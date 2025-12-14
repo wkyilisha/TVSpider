@@ -6,6 +6,7 @@ import com.github.catvod.bean.Result;
 import com.github.catvod.bean.Vod;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.net.OkHttp;
+import com.github.catvod.net.OkResult; // 关键：导入OkResult类
 import com.github.catvod.utils.Notify;
 
 import org.apache.commons.lang3.StringUtils;
@@ -61,7 +62,7 @@ public class Qkys extends Spider {
         LinkedHashMap<String, List<Filter>> filters = new LinkedHashMap<>();
         Document doc = Jsoup.parse(OkHttp.string(siteUrl));
 
-        // 提取分类
+        // 提取分类（容错：空值跳过）
         for (Element li : doc.select(".stui-header__menu > li")) {
             String href = li.select("a").attr("href");
             String text = li.select("a").text();
@@ -297,7 +298,7 @@ public class Qkys extends Spider {
             return Result.error("POST请求参数缺失");
         }
 
-        // 3. 构造POST请求，获取真实播放地址
+        // 3. 构造POST请求，获取真实播放地址（核心修复：处理OkResult）
         String postApi = cdnDomain + "/admin/mizhi_json.php";
         Map<String, String> postHeader = new HashMap<>();
         postHeader.put("x-requested-with", "XMLHttpRequest");
@@ -318,12 +319,21 @@ public class Qkys extends Spider {
             URLEncoder.encode(vkey, "UTF-8")
         );
 
-        // 修复：OkHttp.post参数顺序（url, requestBody, headers）
-        String postResponse = OkHttp.post(postApi, requestBody, postHeader);
-        if (StringUtils.isEmpty(postResponse)) {
-            Notify.show("解析失败：POST请求无响应");
-            return Result.error("POST请求无响应");
+        // ========== 关键修复：处理OkResult类型 ==========
+        OkResult result = OkHttp.post(postApi, requestBody, postHeader);
+        // 检查请求是否成功（状态码200）
+        if (!result.isSuccess()) {
+            Notify.show("解析失败：POST请求失败（状态码：" + result.code() + "）");
+            return Result.error("POST请求失败，状态码：" + result.code());
         }
+        // 提取响应体字符串（自动关闭流）
+        String postResponse = result.body().string();
+        // 容错：响应体为空
+        if (StringUtils.isEmpty(postResponse)) {
+            Notify.show("解析失败：POST响应体为空");
+            return Result.error("POST响应体为空");
+        }
+        // ==============================================
 
         // 4. 解析响应，提取真实播放地址
         JSONObject responseJson = new JSONObject(postResponse);
