@@ -289,7 +289,7 @@ public class Qkys extends Spider {
         postParams.put("vkey", vkey);
 
         // 关键修复：OkHttp.post 返回 OkResult，需要 .string()
-        String postResponse = OkHttp.post(postApi, postHeader, postParams).body();
+        String postResponse = OkHttp.post(postApi, postHeader, postParams).str();
 
         if (StringUtils.isEmpty(postResponse)) {
             Notify.show("解析失败：POST请求无响应");
