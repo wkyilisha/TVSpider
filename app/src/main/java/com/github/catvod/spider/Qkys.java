@@ -245,33 +245,123 @@ for (int i = 0; i < heads.size(); i++) {
         return Result.string(list);
     }
 
-    @Override
-    public String playerContent(String flag, String id, List<String> vipFlags) {
-        try {
-            JSONObject result = new JSONObject();
-            
-            // CatVod 播放模式配置：
-            // 1: 需要嗅探播放 (大部分网站适用，不需要解析 API)
-            // 0: 不需要嗅探，直接播放 id (id 必须是直链，适用于 M3U8/MP4 等)
-            // 2: 通过内置的解析 API (如 JSON 接口) 获取真实地址
-            
-            // 【需要修改】: 根据网站特点选择解析方式。
-            // 大多数网页视频播放器需要选择 parse=1 进行嗅探。
-            result.put("parse", 1); 
-            
-            // 如果网站有防盗链，需要把请求头带给播放器
-            result.put("header", getHeaders().toMultimap());
-            
-            // 这里的 id 是 detailContent 返回的播放链接 (比如 /play/1-1-1.html)
-            result.put("url", id);
-            
-            // playUrl 字段通常为空，除非 parse=0 且 id 是一个需要前置处理的URL
-            result.put("playUrl", ""); 
-            
-            return result.toString();
-        } catch (Exception e) {
-            SpiderDebug.log(e);
-        }
-        return "";
+@Override
+public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
+    String playPageUrl = siteUrl + id;
+    
+    // 1. 请求播放页 HTML (携带修正后的 Header 和 Cookie)
+    Map<String, String> htmlHeader = getHeader(); 
+    htmlHeader.put("Referer", siteUrl + id); // 动态 Referer
+    
+    String playPageHtml = OkHttp.string(playPageUrl, htmlHeader);
+
+    // 2. 提取 player_aaaa 配置
+    Matcher playerMatcher = Pattern.compile("var player_aaaa=(\\{.*?\\});").matcher(playPageHtml);
+    if (!playerMatcher.find()) {
+        Notify.show("解析失败：未找到播放配置");
+        return Result.error("未找到播放配置");
     }
+    JSONObject playerJson = new JSONObject(playerMatcher.group(1));
+
+    String encryptUrl = playerJson.optString("url", "");
+    String type = playerJson.optString("from", "");
+    String playData = playerJson.optString("play_data", "");
+    String next = playPageUrl; // 下一集链接用当前播放页URL
+
+    if (StringUtils.isEmpty(encryptUrl) || StringUtils.isEmpty(type) || StringUtils.isEmpty(playData)) {
+        Notify.show("解析失败：播放核心参数缺失");
+        return Result.error("播放核心参数缺失");
+    }
+
+    // 3. 请求 CDN 中间页 (获取 config)
+    String cdnDomain = "https://cdn-omtcqq-com-oss-cn-hangzhou-shanghai-yys-valipl-vip-cp13.87kkt.com";
+    String cdnPlayUrl = String.format(
+        "%s/index.php?url=%s&type=%s&next=%s&data=%s",
+        cdnDomain,
+        encryptUrl,
+        type,
+        URLEncoder.encode(next, "UTF-8"),
+        playData
+    );
+
+    // 请求 CDN 中间页时，使用通用头部
+    Map<String, String> cdnHeader = getHeader(); 
+    cdnHeader.put("Referer", siteUrl); 
+
+    String cdnHtml = OkHttp.string(cdnPlayUrl, cdnHeader);
+
+    // 4. 提取 config 配置
+    Matcher configMatcher = Pattern.compile("var config = (\\{.*?\\});").matcher(cdnHtml);
+    if (!configMatcher.find()) {
+        Notify.show("解析失败：未找到CDN播放配置");
+        return Result.error("未找到CDN播放配置");
+    }
+    JSONObject configJson = new JSONObject(configMatcher.group(1));
+
+    String postUrlParam = configJson.optString("url", "");
+    String time = configJson.optString("time", "");
+    String vkey = configJson.optString("vkey", "");
+    String key = configJson.optString("key", ""); // 此时 key 为空，无需处理
+
+    if (StringUtils.isEmpty(postUrlParam) || StringUtils.isEmpty(time) || StringUtils.isEmpty(vkey)) {
+        Notify.show("解析失败：POST请求参数缺失");
+        return Result.error("POST请求参数缺失");
+    }
+
+    // 【核心修正：IP 锁定绕过】
+    if (StringUtils.isNotEmpty(postUrlParam)) {
+        // 4.1 Base64 解码，获取包含 IP 的参数字符串
+        String decodedUrl = new String(Base64.decodeBase64(postUrlParam));
+        
+        // 4.2 替换 IP 地址。将 &yonghuip=XX.XX.XX.XX& 替换为通用的 IP (如 8.8.8.8)
+        // 替换所有数字和点号组合的IP，以适配不同测试环境
+        String newDecodedUrl = decodedUrl.replaceAll("&yonghuip=([0-9]{1,3}\\.){3}[0-9]{1,3}&", "&yonghuip=8.8.8.8&");
+        
+        // 4.3 Base64 重新编码
+        postUrlParam = Base64.encodeBase64String(newDecodedUrl.getBytes());
+    }
+    
+    // 5. 发起最终的 POST 解析请求
+    String postApi = cdnDomain + "/admin/mizhi_json.php";
+
+    Map<String, String> postHeader = new HashMap<>();
+    postHeader.put("x-requested-with", "XMLHttpRequest");
+    postHeader.put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36");
+    postHeader.put("Accept", "application/json, text/javascript, */*; q=0.01");
+    postHeader.put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+    postHeader.put("Origin", cdnDomain);
+    postHeader.put("Referer", cdnPlayUrl);
+
+    Map<String, String> postParams = new HashMap<>();
+    postParams.put("url", postUrlParam); // 使用修正后的参数
+    postParams.put("time", time);
+    postParams.put("key", key);
+    postParams.put("vkey", vkey);
+
+    OkResult postResult = OkHttp.post(postApi, postParams, postHeader);
+    String postResponse = postResult != null ? postResult.getBody() : "";
+
+    if (StringUtils.isEmpty(postResponse)) {
+        Notify.show("解析失败：POST请求无响应");
+        return Result.error("POST请求无响应");
+    }
+
+    // 6. 提取真实播放地址
+    JSONObject responseJson = new JSONObject(postResponse);
+    String realPlayUrl = responseJson.optString("json_url", "");
+
+    if (StringUtils.isEmpty(realPlayUrl)) {
+        Notify.show("解析失败：未获取到真实播放地址");
+        return Result.error("未获取到真实播放地址");
+    }
+    
+    // 7. 返回最终结果 (附带视频流所需的 Header)
+    Map<String, String> playHeaderFinal = getVideoHeader();
+    playHeaderFinal.put("Referer", cdnDomain); // 视频流 Referer 设置为 CDN 域名
+
+    return Result.get()
+        .url(realPlayUrl)
+        .header(playHeaderFinal)
+        .string();
+}
 }
