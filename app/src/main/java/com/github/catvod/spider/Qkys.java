@@ -7,6 +7,7 @@ import com.github.catvod.bean.Vod;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.net.OkHttp;
 import com.github.catvod.net.OkResult;
+import org.apache.commons.codec.binary.Base64;
 import com.github.catvod.utils.Notify;
 
 import org.apache.commons.lang3.StringUtils;
@@ -30,12 +31,10 @@ public class Qkys extends Spider {
 
     private Map<String, String> getHeader() {
         Map<String, String> header = new HashMap<>();
-        header.put("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 16_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/100.0.4896.77 Mobile/15E148 Safari/604.1");
-        header.put("Connection", "keep-alive");
-        header.put("Referer", "https://m.87kkt.com/");
-        header.put("sec-fetch-dest", "iframe");
-        header.put("sec-fetch-mode", "navigate");
-        header.put("sec-fetch-site", "cross-site");
+        header.put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36");
+        header.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
+        String cookieString = "server_name_session=da36177dc7200e1bf20e798481dd4311; 5904a3788f1fcbc81fff0c26f2688e30=9f67751aaa76577c6408309ee1e0a6f5";
+        header.put("Cookie", cookieString);
         return header;
     }
 
@@ -136,50 +135,79 @@ public class Qkys extends Spider {
         String briefSketch = doc.select(".detail-sketch").text();
         String briefContent = doc.select(".detail-content").text();
         String vodContent = StringUtils.isEmpty(briefContent) ? briefSketch : (briefSketch + briefContent);
+StringBuilder vodPlayFrom = new StringBuilder();
+StringBuilder vodPlayUrl = new StringBuilder();
 
-        StringBuilder vodPlayFrom = new StringBuilder();
-        StringBuilder vodPlayUrl = new StringBuilder();
+// 1. 选择所有的线路标题（Element Head）
+// CSS选择器：匹配所有 class="stui-vodlist__head" 的 div 元素
+Elements heads = doc.select("div.stui-vodlist__head"); 
 
-        Elements playSourceHeads = doc.select(".stui-vodlist__head");
-        for (int i = 0; i < playSourceHeads.size(); i++) {
-            Element head = playSourceHeads.get(i);
-            String sourceName = head.select("h3.title").text();
-            if (StringUtils.isEmpty(sourceName)) {
-                continue;
-            }
-            Element playlist = head.nextElementSibling();
-            if (playlist == null || !playlist.hasClass("stui-content__playlist")) {
-                continue;
-            }
-            Elements episodes = playlist.select("li > a");
-            if (episodes.isEmpty()) {
-                continue;
-            }
+// 2. 选择所有的播放列表 (Element List)
+// CSS选择器：匹配所有 class="stui-content__playlist" 的 ul 元素
+Elements playlists = doc.select("ul.stui-content__playlist");
 
-            if (vodPlayFrom.length() > 0) {
-                vodPlayFrom.append("$$$");
-            }
-            vodPlayFrom.append(sourceName);
+// 确保线路标题和播放列表的数量一致或播放列表不少于标题
+// 如果数量不一致，可能意味着定位失败，或者网站结构不规范
+if (heads.size() != playlists.size()) {
+    // 我们可以继续，但可能出错。先假设它们数量是一致的。
+    System.out.println("警告：线路标题数量与播放列表数量不匹配！");
+}
 
-            StringBuilder episodeStr = new StringBuilder();
-            for (Element episode : episodes) {
-                String epName = episode.text();
-                String epUrl = episode.attr("href");
-                if (StringUtils.isEmpty(epUrl)) {
-                    continue;
-                }
-                if (episodeStr.length() > 0) {
-                    episodeStr.append("#");
-                }
-                episodeStr.append(epName).append("$").append(epUrl);
-            }
+// 3. 通过索引同步遍历
+// 遍历线路标题集合
+for (int i = 0; i < heads.size(); i++) {
+    Element head = heads.get(i);
+    // 检查索引是否越界，安全起见
+    if (i >= playlists.size()) {
+        break; 
+    }
+    
+    // 获取当前线路标题
+    String sourceName = head.select("h3.title").text().trim();
+    if (StringUtils.isEmpty(sourceName)) {
+        continue;
+    }
 
-            if (vodPlayUrl.length() > 0) {
-                vodPlayUrl.append("$$$");
-            }
-            vodPlayUrl.append(episodeStr);
+    // 获取与当前线路标题i对应的播放列表 i
+    Element playlist = playlists.get(i);
+    
+    // 从列表中选择所有剧集链接
+    Elements episodes = playlist.select("li > a");
+    if (episodes.isEmpty()) {
+        continue;
+    }
+
+    // --- 线路名称拼接 (使用 CatVod 标准 $$$ 分隔) ---
+    if (vodPlayFrom.length() > 0) {
+        vodPlayFrom.append("$$$");
+    }
+    vodPlayFrom.append(sourceName);
+
+    // --- 集数链接拼接 ---
+    StringBuilder episodeStr = new StringBuilder();
+    for (Element episode : episodes) {
+        String epName = episode.text().trim();
+        String epUrl = episode.attr("href"); // 播放链接
+        
+        if (StringUtils.isEmpty(epUrl)) {
+            continue;
         }
+        
+        if (episodeStr.length() > 0) {
+            episodeStr.append("#"); // 剧集间分隔符
+        }
+        // 格式：集名$链接
+        episodeStr.append(epName).append("$").append(epUrl);
+    }
 
+    // --- 播放链接拼接 (使用 CatVod 标准 $$$ 分隔) ---
+    if (episodeStr.length() > 0) {
+        if (vodPlayUrl.length() > 0) {
+            vodPlayUrl.append("$$$");
+        }
+        vodPlayUrl.append(episodeStr.toString());
+    }
+}
         Vod vod = new Vod();
         vod.setVodId(ids.get(0));
         vod.setVodName(title);
@@ -218,100 +246,32 @@ public class Qkys extends Spider {
     }
 
     @Override
-    public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
-        String playPageUrl = siteUrl + id;
-        String playPageHtml = OkHttp.string(playPageUrl, getHeader());
-
-        Matcher playerMatcher = Pattern.compile("var player_aaaa=(\\{.*?\\});").matcher(playPageHtml);
-        if (!playerMatcher.find()) {
-            Notify.show("解析失败：未找到播放配置");
-            return Result.error("未找到播放配置");
+    public String playerContent(String flag, String id, List<String> vipFlags) {
+        try {
+            JSONObject result = new JSONObject();
+            
+            // CatVod 播放模式配置：
+            // 1: 需要嗅探播放 (大部分网站适用，不需要解析 API)
+            // 0: 不需要嗅探，直接播放 id (id 必须是直链，适用于 M3U8/MP4 等)
+            // 2: 通过内置的解析 API (如 JSON 接口) 获取真实地址
+            
+            // 【需要修改】: 根据网站特点选择解析方式。
+            // 大多数网页视频播放器需要选择 parse=1 进行嗅探。
+            result.put("parse", 1); 
+            
+            // 如果网站有防盗链，需要把请求头带给播放器
+            result.put("header", getHeaders().toMultimap());
+            
+            // 这里的 id 是 detailContent 返回的播放链接 (比如 /play/1-1-1.html)
+            result.put("url", id);
+            
+            // playUrl 字段通常为空，除非 parse=0 且 id 是一个需要前置处理的URL
+            result.put("playUrl", ""); 
+            
+            return result.toString();
+        } catch (Exception e) {
+            SpiderDebug.log(e);
         }
-        JSONObject playerJson = new JSONObject(playerMatcher.group(1));
-
-        String encryptUrl = playerJson.optString("url", "");
-        String type = playerJson.optString("from", "");
-        String playData = playerJson.optString("play_data", "");
-        String next = playPageUrl;
-
-        if (StringUtils.isEmpty(encryptUrl) || StringUtils.isEmpty(type) || StringUtils.isEmpty(playData)) {
-            Notify.show("解析失败：播放核心参数缺失");
-            return Result.error("播放核心参数缺失");
-        }
-
-        String cdnDomain = "https://cdn-omtcqq-com-oss-cn-hangzhou-shanghai-yys-valipl-vip-cp13.87kkt.com";
-        String cdnPlayUrl = String.format(
-            "%s/index.php?url=%s&type=%s&next=%s&data=%s",
-            cdnDomain,
-            encryptUrl,
-            type,
-            URLEncoder.encode(next, "UTF-8"),
-            playData
-        );
-
-        Map<String, String> cdnHeader = getVideoHeader();
-        cdnHeader.put("Referer", siteUrl);
-
-        String cdnHtml = OkHttp.string(cdnPlayUrl, cdnHeader);
-
-        Matcher configMatcher = Pattern.compile("var config = (\\{.*?\\});").matcher(cdnHtml);
-        if (!configMatcher.find()) {
-            Notify.show("解析失败：未找到CDN播放配置");
-            return Result.error("未找到CDN播放配置");
-        }
-        JSONObject configJson = new JSONObject(configMatcher.group(1));
-
-        String postUrlParam = configJson.optString("url", "");
-        String time = configJson.optString("time", "");
-        String vkey = configJson.optString("vkey", "");
-        String key = configJson.optString("key", "");
-
-        if (StringUtils.isEmpty(postUrlParam) || StringUtils.isEmpty(time) || StringUtils.isEmpty(vkey)) {
-            Notify.show("解析失败：POST请求参数缺失");
-            return Result.error("POST请求参数缺失");
-        }
-
-        String postApi = cdnDomain + "/admin/mizhi_json.php";
-
-        Map<String, String> postHeader = new HashMap<>();
-        postHeader.put("x-requested-with", "XMLHttpRequest");
-        postHeader.put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36");
-        postHeader.put("Accept", "application/json, text/javascript, */*; q=0.01");
-        postHeader.put("sec-ch-ua", "\"Google Chrome\";v=\"143\", \"Chromium\";v=\"143\", \"Not A(Brand\";v=\"24\"");
-        postHeader.put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
-        postHeader.put("sec-ch-ua-mobile", "?0");
-        postHeader.put("Origin", cdnDomain);
-        postHeader.put("Referer", cdnPlayUrl);
-
-        Map<String, String> postParams = new HashMap<>();
-        postParams.put("url", postUrlParam);
-        postParams.put("time", time);
-        postParams.put("key", key);
-        postParams.put("vkey", vkey);
-
-        // 关键修复：参数顺序为 params 先，header 后；返回 OkResult，用 .getBody() 取字符串
-        OkResult postResult = OkHttp.post(postApi, postParams, postHeader);
-        String postResponse = postResult != null ? postResult.getBody() : "";
-
-        if (StringUtils.isEmpty(postResponse)) {
-            Notify.show("解析失败：POST请求无响应");
-            return Result.error("POST请求无响应");
-        }
-
-        JSONObject responseJson = new JSONObject(postResponse);
-        String realPlayUrl = responseJson.optString("json_url", "");
-
-        if (StringUtils.isEmpty(realPlayUrl)) {
-            Notify.show("解析失败：未获取到真实播放地址");
-            return Result.error("未获取到真实播放地址");
-        }
-
-        Map<String, String> playHeader = getVideoHeader();
-        playHeader.put("Referer", cdnDomain);
-
-        return Result.get()
-            .url(realPlayUrl)
-            .header(playHeader)
-            .string();
+        return "";
     }
 }
