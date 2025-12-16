@@ -1,10 +1,12 @@
-package com.github.catvod.spider;
+Package com.github.catvod.spider;
 
 import com.github.catvod.bean.Class;
 import com.github.catvod.bean.Filter;
 import com.github.catvod.bean.Result;
 import com.github.catvod.bean.Vod;
 import com.github.catvod.crawler.Spider;
+// 导入 SpiderDebug
+import com.github.catvod.crawler.SpiderDebug; 
 import com.github.catvod.net.OkHttp;
 import com.github.catvod.net.OkResult;
 import org.apache.commons.codec.binary.Base64;
@@ -135,79 +137,79 @@ public class Qkys extends Spider {
         String briefSketch = doc.select(".detail-sketch").text();
         String briefContent = doc.select(".detail-content").text();
         String vodContent = StringUtils.isEmpty(briefContent) ? briefSketch : (briefSketch + briefContent);
-StringBuilder vodPlayFrom = new StringBuilder();
-StringBuilder vodPlayUrl = new StringBuilder();
+        StringBuilder vodPlayFrom = new StringBuilder();
+        StringBuilder vodPlayUrl = new StringBuilder();
 
 // 1. 选择所有的线路标题（Element Head）
 // CSS选择器：匹配所有 class="stui-vodlist__head" 的 div 元素
-Elements heads = doc.select("div.stui-vodlist__head"); 
+        Elements heads = doc.select("div.stui-vodlist__head");
 
 // 2. 选择所有的播放列表 (Element List)
 // CSS选择器：匹配所有 class="stui-content__playlist" 的 ul 元素
-Elements playlists = doc.select("ul.stui-content__playlist");
+        Elements playlists = doc.select("ul.stui-content__playlist");
 
 // 确保线路标题和播放列表的数量一致或播放列表不少于标题
 // 如果数量不一致，可能意味着定位失败，或者网站结构不规范
-if (heads.size() != playlists.size()) {
-    // 我们可以继续，但可能出错。先假设它们数量是一致的。
-    System.out.println("警告：线路标题数量与播放列表数量不匹配！");
-}
+        if (heads.size() != playlists.size()) {
+            // 我们可以继续，但可能出错。先假设它们数量是一致的。
+            System.out.println("警告：线路标题数量与播放列表数量不匹配！");
+        }
 
 // 3. 通过索引同步遍历
 // 遍历线路标题集合
-for (int i = 0; i < heads.size(); i++) {
-    Element head = heads.get(i);
-    // 检查索引是否越界，安全起见
-    if (i >= playlists.size()) {
-        break; 
-    }
-    
-    // 获取当前线路标题
-    String sourceName = head.select("h3.title").text().trim();
-    if (StringUtils.isEmpty(sourceName)) {
-        continue;
-    }
+        for (int i = 0; i < heads.size(); i++) {
+            Element head = heads.get(i);
+            // 检查索引是否越界，安全起见
+            if (i >= playlists.size()) {
+                break;
+            }
 
-    // 获取与当前线路标题i对应的播放列表 i
-    Element playlist = playlists.get(i);
-    
-    // 从列表中选择所有剧集链接
-    Elements episodes = playlist.select("li > a");
-    if (episodes.isEmpty()) {
-        continue;
-    }
+            // 获取当前线路标题
+            String sourceName = head.select("h3.title").text().trim();
+            if (StringUtils.isEmpty(sourceName)) {
+                continue;
+            }
 
-    // --- 线路名称拼接 (使用 CatVod 标准 $$$ 分隔) ---
-    if (vodPlayFrom.length() > 0) {
-        vodPlayFrom.append("$$$");
-    }
-    vodPlayFrom.append(sourceName);
+            // 获取与当前线路标题i对应的播放列表 i
+            Element playlist = playlists.get(i);
 
-    // --- 集数链接拼接 ---
-    StringBuilder episodeStr = new StringBuilder();
-    for (Element episode : episodes) {
-        String epName = episode.text().trim();
-        String epUrl = episode.attr("href"); // 播放链接
-        
-        if (StringUtils.isEmpty(epUrl)) {
-            continue;
+            // 从列表中选择所有剧集链接
+            Elements episodes = playlist.select("li > a");
+            if (episodes.isEmpty()) {
+                continue;
+            }
+
+            // --- 线路名称拼接 (使用 CatVod 标准 $$$ 分隔) ---
+            if (vodPlayFrom.length() > 0) {
+                vodPlayFrom.append("$$$");
+            }
+            vodPlayFrom.append(sourceName);
+
+            // --- 集数链接拼接 ---
+            StringBuilder episodeStr = new StringBuilder();
+            for (Element episode : episodes) {
+                String epName = episode.text().trim();
+                String epUrl = episode.attr("href"); // 播放链接
+
+                if (StringUtils.isEmpty(epUrl)) {
+                    continue;
+                }
+
+                if (episodeStr.length() > 0) {
+                    episodeStr.append("#"); // 剧集间分隔符
+                }
+                // 格式：集名$链接
+                episodeStr.append(epName).append("$").append(epUrl);
+            }
+
+            // --- 播放链接拼接 (使用 CatVod 标准 $$$ 分隔) ---
+            if (episodeStr.length() > 0) {
+                if (vodPlayUrl.length() > 0) {
+                    vodPlayUrl.append("$$$");
+                }
+                vodPlayUrl.append(episodeStr.toString());
+            }
         }
-        
-        if (episodeStr.length() > 0) {
-            episodeStr.append("#"); // 剧集间分隔符
-        }
-        // 格式：集名$链接
-        episodeStr.append(epName).append("$").append(epUrl);
-    }
-
-    // --- 播放链接拼接 (使用 CatVod 标准 $$$ 分隔) ---
-    if (episodeStr.length() > 0) {
-        if (vodPlayUrl.length() > 0) {
-            vodPlayUrl.append("$$$");
-        }
-        vodPlayUrl.append(episodeStr.toString());
-    }
-}
         Vod vod = new Vod();
         vod.setVodId(ids.get(0));
         vod.setVodName(title);
@@ -245,22 +247,26 @@ for (int i = 0; i < heads.size(); i++) {
         return Result.string(list);
     }
 
-@Override
+    @Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
         try {
             JSONObject result = new JSONObject();
 
-            HashMap<String, String> headers = getHeaders();
-//            headers.put("","");
-            result.put("parse", 1); // 1表示需要嗅探，如果是0则表示解析
-            result.put("header", headers);
-            result.put("playUrl", "");
-            result.put("url", id);
+            // 修复：将 getHeaders() 改为 getHeader() 或 getVideoHeader()
+            // 在此使用 getVideoHeader() 更符合播放请求的语境
+            Map<String, String> headers = getVideoHeader(); 
+            
+            result.put("parse", 1); // 1表示需要嗅探（默认）
+            result.put("header", new JSONObject(headers)); // CatVod框架要求headers为JSONObject
+            result.put("playUrl", ""); // 无需填充
+            result.put("url", id); // 播放链接，即 id
             return result.toString();
 
         } catch (Exception e) {
-            SpiderDebug.log(e);
+            // 修复：使用已导入的 SpiderDebug.log(e)
+            SpiderDebug.log(e); 
         }
         return "";
     }
 }
+
