@@ -1,4 +1,4 @@
-Package com.github.catvod.spider;
+package com.github.catvod.spider;
 
 import com.github.catvod.bean.Class;
 import com.github.catvod.bean.Filter;
