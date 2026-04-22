@@ -1,4 +1,4 @@
-name: Spider Jar Gen CI (Simplified)
+name: Spider Jar Gen (Optimized)
 
 on:
   push:
@@ -7,12 +7,13 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        
+        with:
+          fetch-depth: 0
+
       - name: Set up JDK 21
         uses: actions/setup-java@v5
         with:
@@ -20,44 +21,42 @@ jobs:
           distribution: 'jetbrains'
           cache: gradle
 
-      - name: Grant execute permission to gradlew
+      - name: Grant execute permission
         run: chmod +x ./gradlew
 
+      # 关键优化1：开启 Gradle 并行、守护进程，开启构建缓存
       - name: Build Custom Spider Jar
-        # ⚠️ 注意：这个命令依赖于您在 app/build.gradle 中注册了 buildCustomSpiderJar 任务！
-        # 如果该任务不存在，您需要将其改为：./gradlew app:shadowJar
-        run: ./gradlew app:buildCustomSpiderJar
-        
-      # --- 保留 Jar 包和 JSON 文件提交到仓库的步骤 ---
+        run: ./gradlew app:buildCustomSpiderJar --parallel --daemon --build-cache
+
       - name: Add & Commit Jar and JSON
         uses: EndBug/add-and-commit@v9.1.4
         with:
           default_author: github_actions
           message: 'update spider jar and json'
-          add: "['./jar/custom_spider.jar', './jar/custom_spider.jar.md5','./json/index.json']"
+          add: |
+            ./jar/custom_spider.jar
+            ./jar/custom_spider.jar.md5
+            ./json/index.json
+          # 关键优化2：禁用拉取，减少网络操作
+          pull: false
 
-      # --- 新增：将生成的 Jar 包保存为 Artifacts 供下载 ---
       - name: Find Jar path
         id: find_jar
-        # 查找您期望的 Jar 包路径
         run: |
           JAR_PATH="./jar/custom_spider.jar"
           if [ -f "$JAR_PATH" ]; then
             echo "JAR_PATH=$JAR_PATH" >> $GITHUB_OUTPUT
           else
-            echo "::warning::Jar file not found at expected path: $JAR_PATH. Checking build output..."
-            # 备用查找路径，以防 buildCustomSpiderJar 任务输出到默认位置 (app/build/libs)
-            BUILT_JAR=$(find . -path "*/app/build/libs/custom_spider.jar" -type f -print | head -n 1)
+            BUILT_JAR=$(find . -name "custom_spider.jar" -type f | head -1)
             if [ -n "$BUILT_JAR" ]; then
-                echo "Found built jar at: $BUILT_JAR"
-                echo "JAR_PATH=$BUILT_JAR" >> $GITHUB_OUTPUT
+              echo "JAR_PATH=$BUILT_JAR" >> $GITHUB_OUTPUT
             else
-                echo "::error::Jar file not found after build."
-                exit 1
+              echo "::error::Jar file not found after build."
+              exit 1
             fi
           fi
-          
-      - name: Upload Jar Artifact for Download
+
+      - name: Upload Jar Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Custom-Spider-Jar
