@@ -1,4 +1,4 @@
-name: Spider Jar Gen (Optimized)
+name: Spider Jar Gen (Fast & Stable)
 
 on:
   push:
@@ -13,6 +13,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@v5
@@ -21,24 +22,26 @@ jobs:
           distribution: 'jetbrains'
           cache: gradle
 
-      - name: Grant execute permission
+      - name: Grant execute permission to gradlew
         run: chmod +x ./gradlew
 
-      # 关键优化1：开启 Gradle 并行、守护进程，开启构建缓存
       - name: Build Custom Spider Jar
         run: ./gradlew app:buildCustomSpiderJar --parallel --daemon --build-cache
 
-      - name: Add & Commit Jar and JSON
-        uses: EndBug/add-and-commit@v9.1.4
-        with:
-          default_author: github_actions
-          message: 'update spider jar and json'
-          add: |
-            ./jar/custom_spider.jar
-            ./jar/custom_spider.jar.md5
-            ./json/index.json
-          # 关键优化2：禁用拉取，减少网络操作
-          pull: false
+      - name: Commit Jar & JSON to repo (no pull)
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          git add ./jar/custom_spider.jar ./jar/custom_spider.jar.md5 ./json/index.json
+          
+          if git diff --cached --quiet; then
+            echo "No changes to commit, skipping push"
+            exit 0
+          fi
+          
+          git commit -m "update spider jar and json"
+          git push origin multiThread
 
       - name: Find Jar path
         id: find_jar
@@ -56,7 +59,7 @@ jobs:
             fi
           fi
 
-      - name: Upload Jar Artifact
+      - name: Upload Jar Artifact for Download
         uses: actions/upload-artifact@v4
         with:
           name: Custom-Spider-Jar
