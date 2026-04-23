@@ -180,6 +180,8 @@ public class KaiGe extends Spider {
             }
             String finalUrl = replaceStepVars(play.optString("final_output", "{final_url}"));
             
+            String finalUrl = replaceStepVars(play.optString("final_output", "{final_url}"));
+            
             String result;
             // 🚀 1. 判斷 JSON 是否已經自定義了完整的返回格式
             if (finalUrl.trim().startsWith("{") && finalUrl.contains("\"parse\"")) {
@@ -190,7 +192,6 @@ public class KaiGe extends Spider {
                 resJson.put("parse", 0);
                 resJson.put("url", finalUrl);
                 
-                // 添加默認 Header
                 JSONObject headJson = new JSONObject();
                 headJson.put("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
                 resJson.put("header", headJson);
@@ -198,15 +199,20 @@ public class KaiGe extends Spider {
                 result = resJson.toString();
             }
 
-            logger("🏁 <b>[解析完成]</b> 返回: " + result);
+            // 📢 強化日誌輸出：綠色表示成功，讓你一眼看到發給殼子的最終數據
+            logger("<br><span style='color:#16a085;'>🏁 <b>[解析成功返回殼子]</b></span><br><code style='color:#2980b9;'>" + result + "</code>");
             return result;
 
         } catch (Exception e) { 
-            logger("🚨 [解析異常]: " + e.getMessage());
-            // 🚀 3. 失敗兜底：帶上 UA 讓殼子嘗試內置解析
-            return "{\"parse\":1,\"url\":\"" + id + "\",\"header\":{\"User-Agent\":\"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36\"}}"; 
+            String errorResult = "{\"parse\":1,\"url\":\"" + id + "\",\"header\":{\"User-Agent\":\"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36\"}}";
+            
+            // 📢 強化異常日誌：紅色表示失敗，同樣把最終兜底數據打出來
+            logger("<br><span style='color:#e74c3c;'>🚨 <b>[解析異常/失敗兜底]</b></span><br>原因是: " + e.getMessage() + "<br><code style='color:#7f8c8d;'>" + errorResult + "</code>");
+            
+            return errorResult; 
         }
     }
+
 
     private String parseList(String html, String pg, boolean isSearch) {
         try {
