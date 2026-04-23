@@ -179,14 +179,34 @@ public class KaiGe extends Spider {
                 }
             }
             String finalUrl = replaceStepVars(play.optString("final_output", "{final_url}"));
-            logger("🏁 <b>[解析完成]</b> 返回: " + finalUrl);
-            return "{\"parse\":0,\"url\":\"" + finalUrl + "\"}";
+            
+            String result;
+            // 🚀 1. 判斷 JSON 是否已經自定義了完整的返回格式
+            if (finalUrl.trim().startsWith("{") && finalUrl.contains("\"parse\"")) {
+                result = finalUrl;
+            } else {
+                // 🚀 2. 如果只是純網址，自動封裝標準格式
+                JSONObject resJson = new JSONObject();
+                resJson.put("parse", 0);
+                resJson.put("url", finalUrl);
+                
+                // 添加默認 Header
+                JSONObject headJson = new JSONObject();
+                headJson.put("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
+                resJson.put("header", headJson);
+                
+                result = resJson.toString();
+            }
+
+            logger("🏁 <b>[解析完成]</b> 返回: " + result);
+            return result;
+
         } catch (Exception e) { 
             logger("🚨 [解析異常]: " + e.getMessage());
-            return "{\"parse\":1,\"url\":\"" + id + "\"}"; 
+            // 🚀 3. 失敗兜底：帶上 UA 讓殼子嘗試內置解析
+            return "{\"parse\":1,\"url\":\"" + id + "\",\"header\":{\"User-Agent\":\"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36\"}}"; 
         }
     }
-
 
     private String parseList(String html, String pg, boolean isSearch) {
         try {
