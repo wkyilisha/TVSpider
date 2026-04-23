@@ -187,11 +187,6 @@ public class KaiGe extends Spider {
         }
     }
 
-            String finalUrl = replaceStepVars(play.optString("final_output", "{final_url}"));
-            logger("🏁 <b>[解析完成]</b> 返回: " + finalUrl);
-            return "{\"parse\":0,\"url\":\"" + finalUrl + "\"}";
-        } catch (Exception e) { return "{\"parse\":1,\"url\":\"" + id + "\"}"; }
-    }
 
     private String parseList(String html, String pg, boolean isSearch) {
         try {
