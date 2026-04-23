@@ -143,9 +143,22 @@ public class KaiGe extends Spider {
                 JSONObject step = steps.getJSONObject(i);
                 String method = step.optString("method", "get").toLowerCase();
                 String stepUrl = replaceStepVars(step.optString("url", url));
+                
+                // 🚀 第一步：準備並獲取最終 Headers
                 Map<String, String> headers = getHeaders(step.optJSONObject("headers"));
                 
+                // 🚀 第二步：打印當前步驟標題與網址
                 logger("<b>Step " + (i+1) + "</b> (" + method.toUpperCase() + "): " + stepUrl);
+
+                // 🚀 第三步：打印詳細請求頭（摺疊顯示）
+                StringBuilder hdLog = new StringBuilder("<details style='margin:5px 0;'><summary style='color:#0077ff;font-size:11px;cursor:pointer;'>📤 點擊查看請求頭 (Headers)</summary><div style='color:#666;font-size:10px;padding:5px;background:#f9f9f9;border-left:2px solid #0077ff;margin-top:5px;'>");
+                for (Map.Entry<String, String> entry : headers.entrySet()) {
+                    hdLog.append("<b>").append(entry.getKey()).append(":</b> ").append(entry.getValue()).append("<br>");
+                }
+                hdLog.append("</div></details>");
+                logger(hdLog.toString());
+                
+                // 🚀 第四步：執行請求
                 OkResult res = method.equals("post") 
                     ? OkHttp.post(stepUrl, replaceStepVars(step.optString("body")), headers)
                     : OkHttp.get(stepUrl, null, headers);
@@ -165,6 +178,15 @@ public class KaiGe extends Spider {
                     }
                 }
             }
+            String finalUrl = replaceStepVars(play.optString("final_output", "{final_url}"));
+            logger("🏁 <b>[解析完成]</b> 返回: " + finalUrl);
+            return "{\"parse\":0,\"url\":\"" + finalUrl + "\"}";
+        } catch (Exception e) { 
+            logger("🚨 [解析異常]: " + e.getMessage());
+            return "{\"parse\":1,\"url\":\"" + id + "\"}"; 
+        }
+    }
+
             String finalUrl = replaceStepVars(play.optString("final_output", "{final_url}"));
             logger("🏁 <b>[解析完成]</b> 返回: " + finalUrl);
             return "{\"parse\":0,\"url\":\"" + finalUrl + "\"}";
