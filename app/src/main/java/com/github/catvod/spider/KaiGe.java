@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class KaiGe extends Spider {
+    private String siteUrl = ""; // 🚀 全局域名變量
     private JSONObject rule = new JSONObject();
     private Map<String, String> varPool = new HashMap<>();
     private final ExecutorService logExecutor = Executors.newSingleThreadExecutor();
@@ -33,19 +34,24 @@ public class KaiGe extends Spider {
         int len = html.length();
         logger("📥 [" + title + "] 成功 | 長度: " + len + " 字節");
         if (showSource) {
-            String preview = (len > 1000 ? html.substring(0, 1000) : html).trim().replace("\n", " ");
+            String preview = (len > 3000 ? html.substring(0, 3000) : html).trim().replace("\n", " ");
             logger("📄 [源碼預覽]: " + preview.replace("<", "&lt;").replace(">", "&gt;") + "...");
         }
     }
 
-    @Override
+@Override
     public void init(Context context, String extend) {
         try {
             logger("------------------------------------------");
             logger("🚀❤️ <b>凱哥全能獨立引擎啟動 (Full Power)...</b>");
             String json = extend.startsWith("http") ? OkHttp.string(extend, null) : extend;
             this.rule = new JSONObject(json);
+
+            // 🚀 從配置中自動提取域名，適配所有網站
+            this.siteUrl = rule.optString("site_url", rule.optString("host", ""));
+
             logger("✅ [系統] 站點配置加載完成: " + rule.optString("site_name"));
+            logger("🌐 [系統] 域名自動綁定: " + this.siteUrl);
         } catch (Exception e) {
             logger("🚨 [系統] 初始化失敗: " + e.getMessage());
         }
@@ -64,16 +70,32 @@ public class KaiGe extends Spider {
         } catch (Exception ex) { return "{\"list\":[]}"; }
     }
 
-    @Override
+@Override
     public String searchContent(String key, boolean quick) {
         try {
             String url = rule.optString("search_url").replace("{wd}", URLEncoder.encode(key, "UTF-8"));
-            if (url.startsWith("/") && !url.startsWith("//")) url = rule.optString("host") + url;
+
+            if (url.contains("{host}")) {
+                url = url.replace("{host}", this.siteUrl);
+            } 
+            else if (url.startsWith("/") && !url.startsWith("//") && !url.contains("http")) {
+                String baseUrl = this.siteUrl;
+                if (baseUrl.endsWith("/")) {
+                    baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+                }
+                url = baseUrl + url;
+            }
+
             logger("🔍 [搜索] 關鍵字: " + key + " | 網址: " + url);
+
             OkResult res = OkHttp.get(url, null, getHeaders(null));
             logCheck("搜索", res.getBody(), false);
+
             return parseList(res.getBody(), "1", true);
-        } catch (Exception e) { return "{\"list\":[]}"; }
+        } catch (Exception e) { 
+            logger("🚨 [搜索異常]: " + e.getMessage());
+            return "{\"list\":[]}"; 
+        }
     }
 
     @Override
@@ -84,7 +106,7 @@ public class KaiGe extends Spider {
             logger("📝 [詳情] 正在解析內容: " + url);
             OkResult res = OkHttp.get(url, null, getHeaders(null));
             logCheck("詳情", res.getBody(), false);
-            
+
             Document doc = Jsoup.parse(res.getBody());
             JSONObject vod = new JSONObject();
             vod.put("vod_id", id);
@@ -94,7 +116,7 @@ public class KaiGe extends Spider {
             vod.put("vod_actor", extract(doc, rule.optString("dt_actor")));
             vod.put("vod_director", extract(doc, rule.optString("dt_director")));
             vod.put("vod_content", extract(doc, rule.optString("dt_content")));
-            
+
             Elements froms = doc.select(rule.optString("dt_from"));
             List<String> fList = new ArrayList<>();
             for (Element f : froms) fList.add(f.text().trim());
@@ -128,41 +150,54 @@ public class KaiGe extends Spider {
 
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
-        try {
+try {
             String url = id.startsWith("/") && !id.startsWith("//") ? rule.optString("host") + id : id;
             logger("<br>🎬 <b>[播放解析啟動]</b>: " + url);
-            if (!rule.has("play")) return "{\"parse\":0,\"url\":\"" + url + "\"}";
-            
-            JSONObject play = rule.getJSONObject("play");
+
+            // ❌ 注意：原代碼這行 if (!rule.has("play")) ... 必須刪掉或註釋掉，否則會直接返回 parse:0 導致後面的邏輯跑不到
+            // if (!rule.has("play")) return "{\"parse\":0,\"url\":\"" + url + "\"}";
+
+            JSONObject play = rule.has("play") ? rule.getJSONObject("play") : new JSONObject();
             JSONArray steps = play.optJSONArray("steps");
+
+            // --- 🚀 凱哥分流邏輯：沒 Step 直接回嗅探，有 Step 才跑解析 ---
+            int stepCount = (steps != null ? steps.length() : 0);
+            boolean isStream = url.toLowerCase().contains(".m3u8") || url.toLowerCase().contains(".mp4") || url.toLowerCase().contains(".flv");
+
+            // 🔥 第一關：如果完全沒有步驟，直接秒回（除非網址本身就是流媒體後綴）
+            if (stepCount == 0) {
+                int pValue = isStream ? 0 : 1;
+                JSONObject res = new JSONObject();
+                res.put("parse", pValue);
+                res.put("url", url);
+                res.put("header", getPlayHeaders(play)); 
+                String result = res.toString();
+
+                logger("<br><span style='color:#e67e22;'>🏁 <b>[無步驟模式]</b></span>" +
+                        "<br><b>判定原因:</b> 規則無 Steps" +
+                        "<br><b>返回類型:</b> " + (pValue == 0 ? "直連" : "嗅探") +
+                        "<br><b>完整返回:</b> <code style='color:#2980b9;'>" + result + "</code>");
+                return result;
+            } // <--- 這裡就是你說的原代碼最後那個括號，執行到這就 return 了
+
+            // --- 🚀 第二關：有 Step 的情況下，初始化並執行解析 ---
             varPool.clear();
             varPool.put("play_id", url);
-            
+            varPool.put("final_url", url); // 初始值保底
             String currentHtml = "";
-            for (int i = 0; i < (steps != null ? steps.length() : 0); i++) {
+
+            for (int i = 0; i < stepCount; i++) {
                 JSONObject step = steps.getJSONObject(i);
                 String method = step.optString("method", "get").toLowerCase();
                 String stepUrl = replaceStepVars(step.optString("url", url));
-                
-                // 🚀 第一步：準備並獲取最終 Headers
                 Map<String, String> headers = getHeaders(step.optJSONObject("headers"));
-                
-                // 🚀 第二步：打印當前步驟標題與網址
+
                 logger("<b>Step " + (i+1) + "</b> (" + method.toUpperCase() + "): " + stepUrl);
 
-                // 🚀 第三步：打印詳細請求頭（摺疊顯示）
-                StringBuilder hdLog = new StringBuilder("<details style='margin:5px 0;'><summary style='color:#0077ff;font-size:11px;cursor:pointer;'>📤 點擊查看請求頭 (Headers)</summary><div style='color:#666;font-size:10px;padding:5px;background:#f9f9f9;border-left:2px solid #0077ff;margin-top:5px;'>");
-                for (Map.Entry<String, String> entry : headers.entrySet()) {
-                    hdLog.append("<b>").append(entry.getKey()).append(":</b> ").append(entry.getValue()).append("<br>");
-                }
-                hdLog.append("</div></details>");
-                logger(hdLog.toString());
-                
-                // 🚀 第四步：執行請求
                 OkResult res = method.equals("post") 
                     ? OkHttp.post(stepUrl, replaceStepVars(step.optString("body")), headers)
                     : OkHttp.get(stepUrl, null, headers);
-                
+
                 currentHtml = res.getBody();
                 logCheck("解析 Step " + (i+1), currentHtml, true);
 
@@ -174,41 +209,61 @@ public class KaiGe extends Spider {
                         String vRule = vars.getString(k);
                         String val = vRule.startsWith("json:") ? new JSONObject(currentHtml).optString(vRule.substring(5)) : extract(currentHtml, vRule);
                         varPool.put(k, val);
+                        // 🚀 同步更新 final_url，確保後面的邏輯能拿到解析後的地址
+                        if (k.equals("final_url") || k.equals("url")) varPool.put("final_url", val);
                         logger("  └ 💡 提取變量 [<b>" + k + "</b>] = " + val);
                     }
                 }
             }
-            String finalUrl = replaceStepVars(play.optString("final_output", "{final_url}"));
-            
-            String result;
-            // 🚀 1. 判斷 JSON 是否已經自定義了完整的返回格式
-            if (finalUrl.trim().startsWith("{") && finalUrl.contains("\"parse\"")) {
-                result = finalUrl;
-            } else {
-                // 🚀 2. 如果只是純網址，自動封裝標準格式
-                JSONObject resJson = new JSONObject();
-                resJson.put("parse", 0);
-                resJson.put("url", finalUrl);
-                
-                JSONObject headJson = new JSONObject();
-                headJson.put("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
-                resJson.put("header", headJson);
-                
-                result = resJson.toString();
-            }
 
-            // 📢 強化日誌輸出：綠色表示成功
-            logger("<br><span style='color:#16a085;'>🏁 <b>[解析成功返回殼子]</b></span><br><code style='color:#2980b9;'>" + result + "</code>");
+            // --- 🚀 第三關：有 Step 執行後的判定邏輯 ---
+            String finalUrl = varPool.get("final_url");
+            if (finalUrl == null) finalUrl = url;
+
+            // 重新判定解析後的地址是否有視頻後綴
+            boolean finalHasStream = finalUrl.toLowerCase().contains(".m3u8") || finalUrl.toLowerCase().contains(".mp4");
+            int pValue = (finalHasStream || !finalUrl.equals(url)) ? 0 : 1;
+
+            JSONObject resJson = new JSONObject();
+            resJson.put("parse", pValue);
+            resJson.put("url", finalUrl);
+            resJson.put("header", getPlayHeaders(play));
+            String result = resJson.toString();
+
+            logger("<br><span style='color:#16a085;'>🏁 <b>[解析返回診斷]</b></span>" +
+                   "<br><b>判定原因:</b> Step 解析完成" +
+                   "<br><b>最終地址:</b> " + finalUrl +
+                   "<br><b>完整返回:</b> <code style='color:#2980b9;'>" + result + "</code>");
+
             return result;
 
         } catch (Exception e) { 
-            String errorResult = "{\"parse\":1,\"url\":\"" + id + "\",\"header\":{\"User-Agent\":\"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36\"}}";
-            
-            // 📢 強化異常日誌：紅色表示失敗
-            logger("<br><span style='color:#e74c3c;'>🚨 <b>[解析異常/失敗兜底]</b></span><br>原因是: " + e.getMessage() + "<br><code style='color:#7f8c8d;'>" + errorResult + "</code>");
-            
-            return errorResult; 
+            String finalId = id;
+            if (id != null && !id.startsWith("http")) {
+                String baseUrl = this.siteUrl;
+                if (baseUrl != null && !baseUrl.isEmpty()) {
+                    if (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+                    finalId = id.startsWith("/") ? (baseUrl + id) : (baseUrl + "/" + id);
+                }
+            }
+            String errorResult = "{\"parse\":1,\"url\":\"" + finalId + "\",\"header\":{\"User-Agent\":\"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36\",\"Referer\":\"" + this.siteUrl + "/\",\"Origin\":\"" + this.siteUrl + "\"}}";
+            logger("<br><span style='color:#e74c3c;'>🚨 <b>[解析異常拋給殼子]</b></span><br>原因: " + e.getMessage() + "<br>返回: <code>" + errorResult + "</code>");
+            return errorResult;
         }
+    }
+
+    // 🚀 在類末尾補上這個提取播放頭的輔助方法，保證代碼簡潔
+    private JSONObject getPlayHeaders(JSONObject play) {
+        JSONObject headJson = play.optJSONObject("play_headers");
+        if (headJson == null) {
+            headJson = new JSONObject();
+            try {
+                headJson.put("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
+                headJson.put("Referer", this.siteUrl + "/");
+                headJson.put("Origin", this.siteUrl);
+            } catch (Exception e) {}
+        }
+        return headJson;
     }
 
     private String parseList(String html, String pg, boolean isSearch) {
