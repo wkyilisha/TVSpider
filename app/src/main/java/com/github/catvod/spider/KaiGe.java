@@ -15,6 +15,7 @@ import java.net.URLEncoder;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import com.github.catvod.utils.KaiGeEngine;
 
 public class KaiGe extends Spider {
     private String siteUrl = ""; // 🚀 全局域名變量
