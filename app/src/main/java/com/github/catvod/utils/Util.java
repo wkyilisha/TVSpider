@@ -153,7 +153,6 @@ public class Util {
     public static void copy(String text) {
         ClipboardManager manager = (ClipboardManager) Init.context().getSystemService(Context.CLIPBOARD_SERVICE);
         manager.setPrimaryClip(ClipData.newPlainText("fongmi", text));
-        Notify.show("已複製 " + text);
     }
 
     public static void loadUrl(WebView webView, String script) {
@@ -211,12 +210,6 @@ public class Util {
         }
     }
 
-
-    /**
-     * @param referer
-     * @param cookie  多个cookie name=value;name2=value2
-     * @return
-     */
     public static HashMap<String, String> webHeaders(String referer, String cookie) {
         HashMap<String, String> map = webHeaders(referer);
         map.put("Cookie", cookie);
@@ -248,25 +241,32 @@ public class Util {
         return uri.getHost();
     }
 
+    // 🚀 凱哥，這就是你要的新工具，已經幫你修好了重複定義和報錯問題
+    public static String cut(String text, String start, String end) {
+        try {
+            if (text == null || text.isEmpty() || start == null || start.isEmpty()) return "";
+            int s = text.indexOf(start);
+            if (s > -1) {
+                s += start.length();
+                int e = text.indexOf(end, s);
+                if (e > -1) return text.substring(s, e).trim();
+            }
+        } catch (Exception e) {}
+        return "";
+    }
 
     public static String findByRegex(String regex, String content, Integer groupCount) {
-        // 创建 Pattern 对象
         Pattern r = Pattern.compile(regex);
-
-        // 现在创建 matcher 对象
         Matcher m = r.matcher(content);
-        if (m.find()) {
-            return m.group(groupCount);
-        } else {
-            return "";
-        }
+        if (m.find()) return m.group(groupCount);
+        return "";
     }
+
     public static String getStrByRegex(Pattern pattern, String str) {
         Matcher matcher = pattern.matcher(str);
         if (matcher.find()) return matcher.group(1).trim();
         return "";
     }
-
 
     public static String base64Decode(String s) {
         return new String(android.util.Base64.decode(s, Base64.NO_WRAP), Charset.defaultCharset());
@@ -276,45 +276,28 @@ public class Util {
         return new String(android.util.Base64.encode(bytes, Base64.NO_WRAP), Charset.defaultCharset());
     }
 
-    /**
-     * 字符串相似度匹配
-     *
-     * @returns
-     */
-
     public static LCSResult lcs(String str1, String str2) {
-        if (str1 == null || str2 == null) {
-            return new LCSResult(0, "", 0);
-        }
-
+        if (str1 == null || str2 == null) return new LCSResult(0, "", 0);
         StringBuilder sequence = new StringBuilder();
         int str1Length = str1.length();
         int str2Length = str2.length();
         int[][] num = new int[str1Length][str2Length];
         int maxlen = 0;
         int lastSubsBegin = 0;
-
         for (int i = 0; i < str1Length; i++) {
             for (int j = 0; j < str2Length; j++) {
                 if (str1.charAt(i) != str2.charAt(j)) {
                     num[i][j] = 0;
                 } else {
-                    if (i == 0 || j == 0) {
-                        num[i][j] = 1;
-                    } else {
-                        num[i][j] = 1 + num[i - 1][j - 1];
-                    }
-
+                    if (i == 0 || j == 0) num[i][j] = 1;
+                    else num[i][j] = 1 + num[i - 1][j - 1];
                     if (num[i][j] > maxlen) {
                         maxlen = num[i][j];
                         int thisSubsBegin = i - num[i][j] + 1;
-                        if (lastSubsBegin == thisSubsBegin) {
-                            // if the current LCS is the same as the last time this block ran
-                            sequence.append(str1.charAt(i));
-                        } else {
-                            // this block resets the string builder if a different LCS is found
+                        if (lastSubsBegin == thisSubsBegin) sequence.append(str1.charAt(i));
+                        else {
                             lastSubsBegin = thisSubsBegin;
-                            sequence.setLength(0); // clear it
+                            sequence.setLength(0);
                             sequence.append(str1.substring(lastSubsBegin, i + 1));
                         }
                     }
@@ -324,17 +307,10 @@ public class Util {
         return new LCSResult(maxlen, sequence.toString(), lastSubsBegin);
     }
 
-
     public static Integer findAllIndexes(List<String> arr, String value) {
-
-        for (int i = 0; i < arr.size(); i++) {
-            if (arr.get(i).equals(value)) {
-                return i;
-            }
-        }
+        for (int i = 0; i < arr.size(); i++) if (arr.get(i).equals(value)) return i;
         return 0;
     }
-
 
     public static String sha1Hex(String input) throws NoSuchAlgorithmException {
         try {
@@ -350,9 +326,7 @@ public class Util {
         StringBuilder hexString = new StringBuilder();
         for (byte b : bytes) {
             String hex = Integer.toHexString(0xff & b);
-            if (hex.length() == 1) {
-                hexString.append('0');
-            }
+            if (hex.length() == 1) hexString.append('0');
             hexString.append(hex);
         }
         return hexString.toString();
@@ -369,51 +343,38 @@ public class Util {
     }
 
     public static String unicodeToString(String unicode) {
-        if (StringUtils.isBlank(unicode)) {
-            return unicode;
-        }
-
+        if (StringUtils.isBlank(unicode)) return unicode;
         final int len = unicode.length();
         StringBuilder sb = new StringBuilder(len);
         int i;
         int pos = 0;
         while ((i = StringUtils.indexOfIgnoreCase(unicode, "\\u", pos)) != -1) {
-            sb.append(unicode, pos, i);//写入Unicode符之前的部分
+            sb.append(unicode, pos, i);
             pos = i;
             if (i + 5 < len) {
                 char c;
                 try {
                     c = (char) Integer.parseInt(unicode.substring(i + 2, i + 6), 16);
                     sb.append(c);
-                    pos = i + 6;//跳过整个Unicode符
+                    pos = i + 6;
                 } catch (NumberFormatException e) {
-                    //非法Unicode符，跳过
-                    sb.append(unicode, pos, i + 2);//写入"\\u"
+                    sb.append(unicode, pos, i + 2);
                     pos = i + 2;
                 }
-            } else {
-                //非Unicode符，结束
-                break;
-            }
+            } else break;
         }
-
-        if (pos < len) {
-            sb.append(unicode, pos, len);
-        }
+        if (pos < len) sb.append(unicode, pos, len);
         return sb.toString();
     }
-
 
     public static class LCSResult {
         public int length;
         public String sequence;
         public int offset;
-
         public LCSResult(int length, String sequence, int offset) {
             this.length = length;
             this.sequence = sequence;
             this.offset = offset;
         }
     }
-
 }
