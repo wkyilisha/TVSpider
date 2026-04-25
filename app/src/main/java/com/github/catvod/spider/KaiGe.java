@@ -15,6 +15,7 @@ import java.net.URLEncoder;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import com.github.catvod.utils.KaiGeEngine;
 
 public class KaiGe extends Spider {
     private String siteUrl = ""; // 🚀 全局域名變量
@@ -34,7 +35,7 @@ public class KaiGe extends Spider {
         int len = html.length();
         logger("📥 [" + title + "] 成功 | 長度: " + len + " 字節");
         if (showSource) {
-            String preview = (len > 3000 ? html.substring(0, 3000) : html).trim().replace("\n", " ");
+            String preview = (len > 7000 ? html.substring(0, 7000) : html).trim().replace("\n", " ");
             logger("📄 [源碼預覽]: " + preview.replace("<", "&lt;").replace(">", "&gt;") + "...");
         }
     }
@@ -46,10 +47,10 @@ public class KaiGe extends Spider {
             logger("🚀❤️ <b>凱哥全能獨立引擎啟動 (Full Power)...</b>");
             String json = extend.startsWith("http") ? OkHttp.string(extend, null) : extend;
             this.rule = new JSONObject(json);
-
+            
             // 🚀 從配置中自動提取域名，適配所有網站
             this.siteUrl = rule.optString("site_url", rule.optString("host", ""));
-
+            
             logger("✅ [系統] 站點配置加載完成: " + rule.optString("site_name"));
             logger("🌐 [系統] 域名自動綁定: " + this.siteUrl);
         } catch (Exception e) {
@@ -74,7 +75,7 @@ public class KaiGe extends Spider {
     public String searchContent(String key, boolean quick) {
         try {
             String url = rule.optString("search_url").replace("{wd}", URLEncoder.encode(key, "UTF-8"));
-
+            
             if (url.contains("{host}")) {
                 url = url.replace("{host}", this.siteUrl);
             } 
@@ -87,10 +88,10 @@ public class KaiGe extends Spider {
             }
 
             logger("🔍 [搜索] 關鍵字: " + key + " | 網址: " + url);
-
+            
             OkResult res = OkHttp.get(url, null, getHeaders(null));
             logCheck("搜索", res.getBody(), false);
-
+            
             return parseList(res.getBody(), "1", true);
         } catch (Exception e) { 
             logger("🚨 [搜索異常]: " + e.getMessage());
@@ -106,7 +107,7 @@ public class KaiGe extends Spider {
             logger("📝 [詳情] 正在解析內容: " + url);
             OkResult res = OkHttp.get(url, null, getHeaders(null));
             logCheck("詳情", res.getBody(), false);
-
+            
             Document doc = Jsoup.parse(res.getBody());
             JSONObject vod = new JSONObject();
             vod.put("vod_id", id);
@@ -116,7 +117,7 @@ public class KaiGe extends Spider {
             vod.put("vod_actor", extract(doc, rule.optString("dt_actor")));
             vod.put("vod_director", extract(doc, rule.optString("dt_director")));
             vod.put("vod_content", extract(doc, rule.optString("dt_content")));
-
+            
             Elements froms = doc.select(rule.optString("dt_from"));
             List<String> fList = new ArrayList<>();
             for (Element f : froms) fList.add(f.text().trim());
@@ -193,11 +194,11 @@ try {
                 Map<String, String> headers = getHeaders(step.optJSONObject("headers"));
 
                 logger("<b>Step " + (i+1) + "</b> (" + method.toUpperCase() + "): " + stepUrl);
-
+                
                 OkResult res = method.equals("post") 
                     ? OkHttp.post(stepUrl, replaceStepVars(step.optString("body")), headers)
                     : OkHttp.get(stepUrl, null, headers);
-
+                
                 currentHtml = res.getBody();
                 logCheck("解析 Step " + (i+1), currentHtml, true);
 
@@ -286,27 +287,77 @@ try {
         } catch (Exception e) { return "{\"list\":[]}"; }
     }
 
-    private String extract(Object root, String ruleStr) {
-        try {
-            if (TextUtils.isEmpty(ruleStr) || root == null) return "";
+private String extract(Object root, String ruleStr) {
+    try {
+        if (TextUtils.isEmpty(ruleStr) || root == null) {
+            return "";
+        }
+
+        // 🚀 【新增邏輯】處理純源碼字符串（Step 2 的關鍵）
+        if (root instanceof String) {
+            String content = (String) root;
             String workRule = ruleStr.replace("@", "&&");
+            
             if (workRule.contains("&&")) {
-                String[] parts = workRule.split("&&");
-                Element target = (root instanceof Document) ? ((Document) root).selectFirst(parts[0].trim()) : ((Element) root).selectFirst(parts[0].trim());
-                if (target != null) {
-                    String second = parts[1].trim();
-                    if (isAttr(second)) return target.attr(second).trim();
-                    if (second.equals("text") || second.isEmpty()) return target.text().trim();
-                    return extractString(target.outerHtml(), second);
+                String result = extractString(content, workRule);
+                // 💡 日誌：監控字符串截取結果
+                if (result.isEmpty()) {
+                    String start = workRule.split("&&")[0].trim();
+                    if (!content.contains(start)) {
+                        logger("⚠️ [提取失敗] 源碼中完全找不到起點關鍵詞: " + start);
+                    } else {
+                        logger("⚠️ [提取失敗] 找到起點但未找到匹配的終點，規則: " + workRule);
+                    }
+                } else {
+                    logger("✅ [提取成功] 規則: " + workRule + " -> 提取值: " + result);
                 }
+                return result;
+            } else {
+                // CSS 選擇器日誌
+                Document doc = Jsoup.parse(content);
+                Element el = doc.selectFirst(workRule);
+                String res = el != null ? el.text().trim() : "";
+                logger("🔍 [CSS提取] 規則: " + workRule + " -> 結果: " + res);
+                return res;
             }
-            if (root instanceof Element) {
-                Element el = ((Element) root).selectFirst(workRule);
-                return el != null ? el.text().trim() : "";
+        }
+
+        // 🚀 【原有邏輯】處理 Document / Element 對象
+        String workRule = ruleStr.replace("@", "&&");
+        if (workRule.contains("&&")) {
+            String[] parts = workRule.split("&&");
+            String selector = parts[0].trim();
+            String second = parts[1].trim();
+
+            Element target = (root instanceof Document)
+                    ? ((Document) root).selectFirst(selector)
+                    : ((Element) root).selectFirst(selector);
+
+            if (target != null) {
+                String res = "";
+                if (isAttr(second)) {
+                    res = target.attr(second).trim();
+                } else if (second.equals("text") || second.isEmpty()) {
+                    res = target.text().trim();
+                } else {
+                    res = extractString(target.outerHtml(), second);
+                }
+                logger("✅ [對象提取] 選擇器: " + selector + " -> 結果: " + res);
+                return res;
+            } else {
+                logger("❌ [對象提取] 找不到選擇器節點: " + selector);
             }
-        } catch (Exception e) {}
-        return "";
+        }
+
+        if (root instanceof Element) {
+            Element el = ((Element) root).selectFirst(workRule);
+            return el != null ? el.text().trim() : "";
+        }
+    } catch (Exception e) {
+        logger("🚨 [提取崩潰] 錯誤原因: " + e.getMessage());
     }
+    return "";
+}
 
     private boolean isAttr(String s) {
         String t = s.toLowerCase();
@@ -315,14 +366,30 @@ try {
 
     private String extractString(String content, String ruleStr) {
         try {
-            if (!ruleStr.contains("&&")) return content;
+            if (content == null || !ruleStr.contains("&&")) return "";
+            
             String[] p = ruleStr.split("&&");
-            int s = content.indexOf(p[0].trim());
-            if (s == -1) return "";
-            s += p[0].trim().length();
-            int e = content.indexOf(p[1].trim(), s);
-            return (e != -1) ? content.substring(s, e).trim() : "";
-        } catch (Exception e) { return ""; }
+            String start = p[0].trim();
+            String end = p[1].trim();
+
+            // 🚀 核心調用
+            String result = com.github.catvod.utils.Util.cut(content, start, end);
+            
+            // 💡 凱哥專用調試日誌：如果提取是空的，我們就打印原因
+            if (result.isEmpty()) {
+                if (!content.contains(start)) {
+                    logger("⚠️ [匹配失敗] 源碼中找不到起點: " + start);
+                } else {
+                    logger("⚠️ [匹配失敗] 找到起點但找不到終點: " + end);
+                }
+            }
+            
+            return result;
+            
+        } catch (Exception e) { 
+            logger("❌ [提取崩潰]: " + e.getMessage());
+            return ""; 
+        }
     }
 
     private String replaceStepVars(String text) {
