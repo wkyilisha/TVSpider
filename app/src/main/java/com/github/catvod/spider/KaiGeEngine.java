@@ -48,25 +48,25 @@ public class KaiGeEngine {
         }
 
         // 🚀 3. 強制雙解碼 (解決你說的解密不對問題：只要規則裡有，最後統一按順序解)
+        // 🚀 核心修改：适配你的双解码逻辑
         if (!isEmpty(finalValue)) {
-            // 先解 Base64
+            // 只要规则里包含 [base64]，不管写在哪，最后统一解一次
             if (rule.contains("[base64]")) {
-                try {
-                    finalValue = new String(Base64.decode(finalValue, Base64.DEFAULT));
-                } catch (Exception e) {}
+                try { finalValue = new String(Base64.decode(finalValue, Base64.DEFAULT)); } catch (Exception e) {}
             }
-            // 再解 URL 編碼 (還原斜槓等)
+            // 只要规则里包含 [url_decode]，最后再还原斜杠
             if (rule.contains("[url_decode]")) {
-                try {
-                    finalValue = URLDecoder.decode(finalValue, "UTF-8");
-                } catch (Exception e) {}
+                try { finalValue = java.net.URLDecoder.decode(finalValue, "UTF-8"); } catch (Exception e) {}
             }
         }
 
-        // 4. 過濾與補全
+        // 🚀 核心修改：适配包含和排除
         if (!isEmpty(result.includeKey) && !finalValue.contains(result.includeKey)) finalValue = "";
         if (!isEmpty(result.excludeKey) && finalValue.contains(result.excludeKey)) finalValue = "";
+
+        // 补全域名逻辑
         if (result.shouldFull && !isEmpty(finalValue)) finalValue = autoFullUrl(finalValue, host);
+
 
         result.value = finalValue;
         return result;
@@ -94,30 +94,31 @@ public class KaiGeEngine {
     }
 
     private static String executeSingleRule(String html, String rule) {
-        // 處理 @ 屬性提取
         if (rule.contains("@")) {
+            // ... 原有的属性提取逻辑保持不动 ...
             String[] parts = rule.split("@");
-            String attrName = parts[parts.length - 1].trim();
+            String attrName = parts[parts.length - 1].trim(); 
             Pattern p = Pattern.compile(attrName + "\\s*=\\s*[\"']([^\"']*)[\"']", Pattern.CASE_INSENSITIVE);
             Matcher m = p.matcher(html);
             if (m.find()) return m.group(1).trim();
-            return "";
+            return ""; 
         }
 
-        // 處理 && 切割
         if (rule.contains("&&")) {
             String[] parts = rule.split("&&");
             String start = parts[0].trim();
             String end = parts.length > 1 ? parts[1].trim() : "";
             
-            // 🚀 核心修改：如果包含 *，走正則通配符定位
+            // 🚀 核心修改：让它能识别你的 * 号
+            // 只要 start 包含 *，就走通配符匹配，否则走原本的 simpleCut
             if (start.contains("*")) {
                 return cutWithWildcard(html, start, end);
             }
             return simpleCut(html, start, end);
         }
-        return html;
+        return html; 
     }
+
 
     private static String handleCombination(String html, String logic, String host) {
         String[] parts = logic.split("\\s*\\+\\s*");
