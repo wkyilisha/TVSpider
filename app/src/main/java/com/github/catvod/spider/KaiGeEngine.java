@@ -1,14 +1,13 @@
 package com.github.catvod.spider;
 
-import android.text.TextUtils;
-import android.util.Base64; 
+import android.util.Base64;
+import java.net.URLDecoder;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.net.URLDecoder;
 
 /**
- * 凱哥標準規則引擎 2.0 (空格自由版)
- * 已修復：重複方法定義、支持符號前後任意空格、保護提取規則內部空格
+ * 凱哥標準規則引擎 2.0 (最強適配版)
+ * 已修復：* 通配符定位、+ 域名邊切邊拼、[base64][url_decode] 雙解碼順序
  */
 public class KaiGeEngine {
 
@@ -16,7 +15,9 @@ public class KaiGeEngine {
         return str == null || str.length() == 0;
     }
 
-public static ExtractionResult doExtract(String html, String rule, String host) {
+    // --- 修改從這裡開始 ---
+
+    public static ExtractionResult doExtract(String html, String rule, String host) {
         ExtractionResult result = new ExtractionResult();
         if (isEmpty(html) || isEmpty(rule)) return result;
 
@@ -24,34 +25,21 @@ public static ExtractionResult doExtract(String html, String rule, String host) 
         String[] segments = rule.split("\\s*;;\\s*");
         String coreLogic = segments[0].trim();
 
-        // --- 🚀 關鍵修改點 A：符號轉換 (支持 * 和 +) ---
-        // 將你習慣的 * 和 + 在進入處理前，自動轉為引擎認識的 > 
-        if (coreLogic.contains("*") || coreLogic.contains("+")) {
-            coreLogic = coreLogic.replace("*", " > ").replace("+", " > ");
-        }
-
-        // 解析後綴指令（如 [full], [包含:], [排除:] 等）
         for (int i = 1; i < segments.length; i++) {
             String tag = segments[i].trim();
-            if (tag.equalsIgnoreCase("[full]")) {
-                result.shouldFull = true;
-            }
+            if (tag.equalsIgnoreCase("[full]")) result.shouldFull = true;
             if (tag.matches("\\[\\d+\\]")) {
                 result.index = Integer.parseInt(tag.replaceAll("[\\[\\]]", ""));
             }
-            if (tag.startsWith("[包含:")) {
-                result.includeKey = tag.substring(4, tag.length() - 1);
-            }
-            if (tag.startsWith("[排除:")) {
-                result.excludeKey = tag.substring(4, tag.length() - 1);
-            }
+            if (tag.startsWith("[包含:")) result.includeKey = tag.substring(4, tag.length() - 1);
+            if (tag.startsWith("[排除:")) result.excludeKey = tag.substring(4, tag.length() - 1);
         }
 
-        // 2. 處理核心邏輯 (現在 coreLogic 裡的 * 和 + 已經變成 > 了)
+        // 🚀 2. 處理核心邏輯 (支持 > 鏈接跳轉)
         String finalValue = "";
         if (coreLogic.contains(">")) {
             String[] steps = coreLogic.split("\\s*>\\s*");
-            finalValue = html; 
+            finalValue = html;
             for (String step : steps) {
                 finalValue = processStep(finalValue, step.trim(), host);
             }
@@ -59,36 +47,26 @@ public static ExtractionResult doExtract(String html, String rule, String host) 
             finalValue = processStep(html, coreLogic, host);
         }
 
-        // --- 🚀 關鍵修改點 B：自動解碼 (支持 [base64] 和 [url_decode]) ---
+        // 🚀 3. 強制雙解碼 (解決你說的解密不對問題：只要規則裡有，最後統一按順序解)
         if (!isEmpty(finalValue)) {
-            // Base64 解碼處理
+            // 先解 Base64
             if (rule.contains("[base64]")) {
                 try {
-                    finalValue = new String(android.util.Base64.decode(finalValue, android.util.Base64.DEFAULT));
-                } catch (Exception e) {
-                    // 解碼失敗則保留原樣
-                }
+                    finalValue = new String(Base64.decode(finalValue, Base64.DEFAULT));
+                } catch (Exception e) {}
             }
-            // URL 解碼處理
+            // 再解 URL 編碼 (還原斜槓等)
             if (rule.contains("[url_decode]")) {
                 try {
-                    finalValue = java.net.URLDecoder.decode(finalValue, "UTF-8");
-                } catch (Exception e) {
-                    // 解碼失敗則保留原樣
-                }
+                    finalValue = URLDecoder.decode(finalValue, "UTF-8");
+                } catch (Exception e) {}
             }
         }
 
-        // 3. 過濾與補全
-        if (!isEmpty(result.includeKey) && !finalValue.contains(result.includeKey)) {
-            finalValue = "";
-        }
-        if (!isEmpty(result.excludeKey) && finalValue.contains(result.excludeKey)) {
-            finalValue = "";
-        }
-        if (result.shouldFull && !isEmpty(finalValue)) {
-            finalValue = autoFullUrl(finalValue, host);
-        }
+        // 4. 過濾與補全
+        if (!isEmpty(result.includeKey) && !finalValue.contains(result.includeKey)) finalValue = "";
+        if (!isEmpty(result.excludeKey) && finalValue.contains(result.excludeKey)) finalValue = "";
+        if (result.shouldFull && !isEmpty(finalValue)) finalValue = autoFullUrl(finalValue, host);
 
         result.value = finalValue;
         return result;
@@ -96,19 +74,18 @@ public static ExtractionResult doExtract(String html, String rule, String host) 
 
     private static String processStep(String content, String step, String host) {
         if (isEmpty(step)) return content;
-        
-        if (step.equalsIgnoreCase("[base64]")) {
-            try { return new String(Base64.decode(content, Base64.DEFAULT)); } catch (Exception e) { return content; }
+
+        // 跳過解碼指令（因為已經在 doExtract 結尾統一處理了）
+        if (step.equalsIgnoreCase("[base64]") || step.equalsIgnoreCase("[url_decode]")) {
+            return content;
         }
-        if (step.equalsIgnoreCase("[url_decode]")) {
-            try { return java.net.URLDecoder.decode(content, "UTF-8"); } catch (Exception e) { return content; }
-        }
+
         if (step.startsWith("[reg:")) {
-            java.util.regex.Matcher m = java.util.regex.Pattern.compile(step.substring(5, step.length() - 1)).matcher(content);
+            Matcher m = Pattern.compile(step.substring(5, step.length() - 1)).matcher(content);
             return m.find() ? m.group(1).trim() : "";
         }
-        
-        // 🚀 3. 處理拼接：支持 + 號前後任意空格
+
+        // 🚀 核心修改：處理 + 拼接時，支持內部使用 && 提取變量
         if (step.contains("+")) {
             return handleCombination(content, step, host);
         }
@@ -117,40 +94,43 @@ public static ExtractionResult doExtract(String html, String rule, String host) 
     }
 
     private static String executeSingleRule(String html, String rule) {
+        // 處理 @ 屬性提取
         if (rule.contains("@")) {
             String[] parts = rule.split("@");
-            String attrName = parts[parts.length - 1].trim(); 
+            String attrName = parts[parts.length - 1].trim();
             Pattern p = Pattern.compile(attrName + "\\s*=\\s*[\"']([^\"']*)[\"']", Pattern.CASE_INSENSITIVE);
             Matcher m = p.matcher(html);
             if (m.find()) return m.group(1).trim();
-            return ""; 
+            return "";
         }
 
+        // 處理 && 切割
         if (rule.contains("&&")) {
             String[] parts = rule.split("&&");
             String start = parts[0].trim();
             String end = parts.length > 1 ? parts[1].trim() : "";
-            return start.contains("*") ? cutWithWildcard(html, start, end) : simpleCut(html, start, end);
+            
+            // 🚀 核心修改：如果包含 *，走正則通配符定位
+            if (start.contains("*")) {
+                return cutWithWildcard(html, start, end);
+            }
+            return simpleCut(html, start, end);
         }
-        return html; 
+        return html;
     }
 
-    // 🚀 核心修改：只保留一個強大的 handleCombination，支持 + 前後任意空格
     private static String handleCombination(String html, String logic, String host) {
         String[] parts = logic.split("\\s*\\+\\s*");
         StringBuilder sb = new StringBuilder();
-        
+
         for (String p : parts) {
-            String item = p.trim(); 
-            
-            if (item.startsWith("\"") && item.endsWith("\"") && item.length() >= 2) {
-                sb.append(item.substring(1, item.length() - 1));
-            } 
-            else if (item.contains("@") || item.contains("&&")) {
+            String item = p.trim();
+            // 🚀 核心修改：如果是提取指令（含 @ 或 &&），先去摳內容再拼
+            if (item.contains("@") || item.contains("&&")) {
                 sb.append(executeSingleRule(html, item));
-            } 
-            else {
-                sb.append(item);
+            } else {
+                // 否則當作純文字（自動去掉規則裡的引號）
+                sb.append(item.replace("\"", "").replace("'", ""));
             }
         }
         return sb.toString();
@@ -158,6 +138,7 @@ public static ExtractionResult doExtract(String html, String rule, String host) 
 
     private static String cutWithWildcard(String html, String startRule, String end) {
         try {
+            // 將 var player*url\":\" 轉義為正則：var player.*?url\":\"
             String regexStart = Pattern.quote(startRule).replace("*", "\\E.*?\\Q");
             String fullRegex = regexStart + "(.*?)" + (isEmpty(end) ? "$" : Pattern.quote(end));
             Pattern pattern = Pattern.compile(fullRegex, Pattern.DOTALL);
