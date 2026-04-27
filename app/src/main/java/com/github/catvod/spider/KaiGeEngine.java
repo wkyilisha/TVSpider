@@ -139,14 +139,35 @@ public class KaiGeEngine {
 
     private static String cutWithWildcard(String html, String startRule, String end) {
         try {
-            // 將 var player*url\":\" 轉義為正則：var player.*?url\":\"
-            String regexStart = Pattern.quote(startRule).replace("*", "\\E.*?\\Q");
-            String fullRegex = regexStart + "(.*?)" + (isEmpty(end) ? "$" : Pattern.quote(end));
-            Pattern pattern = Pattern.compile(fullRegex, Pattern.DOTALL);
-            Matcher matcher = pattern.matcher(html);
-            return matcher.find() ? matcher.group(1).trim() : "";
-        } catch (Exception e) { return ""; }
+            // 🚀 1. 按照你的想法：分割 * 号左右两部分
+            String[] parts = startRule.split("\\*");
+            String head = parts[0]; // var config
+            String tail = parts.length > 1 ? parts[1] : ""; // url\":\"
+
+            // 🚀 2. 先找 head 的位置
+            int headIdx = html.indexOf(head);
+            if (headIdx == -1) return "";
+
+            // 🚀 3. 从 head 之后的位置开始找 tail
+            int tailStartIdx = html.indexOf(tail, headIdx + head.length());
+            if (tailStartIdx == -1) return "";
+
+            // 🚀 4. 找到 tail 的末尾，也就是数据开始的地方
+            int dataStartIdx = tailStartIdx + tail.length();
+
+            // 🚀 5. 最后用 end (&& 后面的内容) 做切刀
+            if (isEmpty(end)) return html.substring(dataStartIdx).trim();
+            int endIdx = html.indexOf(end, dataStartIdx);
+            
+            if (endIdx > -1) {
+                return html.substring(dataStartIdx, endIdx).trim();
+            }
+        } catch (Exception e) {
+            return "";
+        }
+        return "";
     }
+
 
     private static String simpleCut(String html, String start, String end) {
         try {
