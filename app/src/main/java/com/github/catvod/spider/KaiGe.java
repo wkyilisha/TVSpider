@@ -38,7 +38,7 @@ public class KaiGe extends Spider {
         }
         int len = html.length();
         logger("📥 [" + title + "] 成功 | " + len + " 字符");
-        
+
         if (showSource) {
             // 以前抓 7000 字太長了，現在縮到 500 字，反應速度提升 10 倍
             String preview = (len > 500 ? html.substring(0, 500) : html)
@@ -55,10 +55,10 @@ public class KaiGe extends Spider {
             logger("🚀❤️ <b>凱哥全能獨立引擎啟動 (Full Power)...</b>");
             String json = extend.startsWith("http") ? OkHttp.string(extend, null) : extend;
             this.rule = new JSONObject(json);
-            
+
             // 🚀 從配置中自動提取域名，適配所有網站
             this.siteUrl = rule.optString("site_url", rule.optString("host", ""));
-            
+
             logger("✅ [系統] 站點配置加載完成: " + rule.optString("site_name"));
             logger("🌐 [系統] 域名自動綁定: " + this.siteUrl);
         } catch (Exception e) {
@@ -83,7 +83,7 @@ public class KaiGe extends Spider {
     public String searchContent(String key, boolean quick) {
         try {
             String url = rule.optString("search_url").replace("{wd}", URLEncoder.encode(key, "UTF-8"));
-            
+
             if (url.contains("{host}")) {
                 url = url.replace("{host}", this.siteUrl);
             } 
@@ -96,10 +96,10 @@ public class KaiGe extends Spider {
             }
 
             logger("🔍 [搜索] 關鍵字: " + key + " | 網址: " + url);
-            
+
             OkResult res = OkHttp.get(url, null, getHeaders(null));
             logCheck("搜索", res.getBody(), false);
-            
+
             return parseList(res.getBody(), "1", true);
         } catch (Exception e) { 
             logger("🚨 [搜索異常]: " + e.getMessage());
@@ -115,7 +115,7 @@ public class KaiGe extends Spider {
             logger("📝 [詳情] 正在解析內容: " + url);
             OkResult res = OkHttp.get(url, null, getHeaders(null));
             logCheck("詳情", res.getBody(), false);
-            
+
             Document doc = Jsoup.parse(res.getBody());
             JSONObject vod = new JSONObject();
             vod.put("vod_id", id);
@@ -125,7 +125,7 @@ public class KaiGe extends Spider {
             vod.put("vod_actor", extract(doc, rule.optString("dt_actor")));
             vod.put("vod_director", extract(doc, rule.optString("dt_director")));
             vod.put("vod_content", extract(doc, rule.optString("dt_content")));
-            
+
             // --- 🚀 凱哥全能修復：【第一部分】線路與列表精準配對 ---
             String fromRule = rule.optString("dt_from");
             String listRule = rule.optString("dt_list");
@@ -139,7 +139,7 @@ public class KaiGe extends Spider {
                 cssFrom = parts[0].contains("[包含:") ? (parts.length > 1 ? parts[1] : "h3") : parts[0];
             }
 
-            
+
             Elements fromElements = doc.select(cssFrom);
             logger("🔍 [詳情診斷] 找到標題數量: " + fromElements.size());
 
@@ -187,10 +187,10 @@ public class KaiGe extends Spider {
             for (int i = 0; i < pLists.size(); i++) {
                 List<String> urls = new ArrayList<>();
                 Document listDoc = Jsoup.parse(pLists.get(i));
-                
+
                 String nameRule = rule.optString("dt_list_name");
                 String urlRule = rule.optString("dt_list_url");
-                
+
                 Elements aElements = listDoc.select("a");
                 // 💡 這裡是關鍵日誌點
                 logger("   📂 線路 " + (i+1) + " [" + fList.get(i) + "] 發現 <a> 標籤數量: " + aElements.size());
@@ -198,12 +198,12 @@ public class KaiGe extends Spider {
                 for (Element a : aElements) {
                     String pName = extract(a, nameRule); 
                     String pUrl = extract(a, urlRule);
-                    
+
                     if (!pName.isEmpty() && !pUrl.isEmpty()) {
                         urls.add(pName + "$" + pUrl);
                     }
                 }
-                
+
                 if (urls.size() > 0) {
                     logger("   🎉 [成功] 提取到有效選集: " + urls.size() + " 個 (首集: " + urls.get(0).split("\\$")[0] + ")");
                 } else {
@@ -229,7 +229,7 @@ public class KaiGe extends Spider {
     public String playerContent(String flag, String id, List<String> vipFlags) {
         // 🚀 1. 預置原始地址，防止任何意外導致變量丟失
         String originalUrl = id.startsWith("/") && !id.startsWith("//") ? rule.optString("host") + id : id;
-        
+
         try {
             logger("<br>🎬 <b>[播放解析啟動]</b>: " + originalUrl);
 
@@ -241,6 +241,7 @@ public class KaiGe extends Spider {
             JSONObject play = rule.has("play") ? rule.getJSONObject("play") : new JSONObject();
             JSONArray steps = play.optJSONArray("steps");
             int stepCount = (steps != null ? steps.length() : 0);
+            boolean finalStepSuccess = false;
 
             // 🔥 核心保護：如果沒寫 Step，直接按原始邏輯走 (是流媒體就直連，不是就嗅探)
             if (stepCount == 0) {
@@ -261,12 +262,12 @@ public class KaiGe extends Spider {
 
                 JSONObject step = steps.getJSONObject(i);
                 String method = step.optString("method", "get").toLowerCase();
-                
+
                 // 📢 【接力點】：下一步請求的網址，優先從池子裡拿「上一步切出來的最新地址」
                 // 如果 JSON 裡沒寫新 url，它就會拿 final_url 去請求
                 String lastResult = varPool.get("final_url");
                 String stepUrl = replaceStepVars(step.optString("url", lastResult));
-                
+
                 Map<String, String> headers = getHeaders(step.optJSONObject("headers"));
 
                 logger("<b>Step " + (i + 1) + "</b> (" + method.toUpperCase() + "): " + stepUrl);
@@ -275,81 +276,74 @@ public class KaiGe extends Spider {
                     ? OkHttp.post(stepUrl, replaceStepVars(step.optString("body")), headers)
                     : OkHttp.get(stepUrl, null, headers);
 
-                String html = res.getBody();
+String html = res.getBody();
                 logCheck("解析 Step " + (i + 1), html, true);
 
-                // --- 變量提取與池子更新 ---
-                if (step.has("vars")) {
-                    JSONObject vars = step.getJSONObject("vars");
-                    Iterator<String> keys = vars.keys();
-                    while (keys.hasNext()) {
-                        String k = keys.next();
-                        String vRule = vars.getString(k);
-                        
-                        // 執行提取 (支持 JSON 和 字符串截取)
-                        String val = vRule.startsWith("json:") 
-                            ? new JSONObject(html).optString(vRule.substring(5)) 
-                            : extract(html, vRule);
+                // 🚀 【關鍵修正】：必須先從當前 step 提取 vars 對象，否則下面會報錯
+                JSONObject vars = step.optJSONObject("vars");
 
-                        if (!TextUtils.isEmpty(val)) {
+                        // --- 🚀 開始替換：變量提取循環 ---
+                if (vars != null) {
+                    boolean currentStepAnyOk = false; // 💡 標記本步是否拿到了新地址
+                    for (Iterator<String> it = vars.keys(); it.hasNext(); ) {
+                        String k = it.next();
+                        String vRule = vars.optString(k);
+                        String val = "";
+
+                        if (vRule.startsWith("json:")) {
+                            try { val = new JSONObject(html).optString(vRule.substring(5)); } catch (Exception e) { val = ""; }
+                        } else {
+                            KaiGeEngine.ExtractionResult engineRes = KaiGeEngine.doExtract(html, vRule, this.siteUrl);
+                            val = engineRes.value;
+                            if (android.text.TextUtils.isEmpty(val)) {
+                                logger("  └ ❌ [提取失敗] 規則: " + vRule);
+                            } else {
+                                logger("  └ 💡 [提取成功] [<b>" + k + "</b>] = " + val);
+                            }
+                        }
+
+                        if (!android.text.TextUtils.isEmpty(val)) {
                             varPool.put(k, val);
-                            logger("  └ 💡 提取 [<b>" + k + "</b>] = " + val);
-                            
-                            // 🚀 【接力開關】：只要變量名包含 url 或符合 p1-p4，就認定它是下一步的目標
                             if (k.contains("url") || k.matches("p[1-4]")) {
-                                varPool.put("final_url", val);
-                                logger("  └ 🔄 <b>接力棒更新</b> -> 準備交給下一步");
+                                varPool.put("final_url", val); 
+                                currentStepAnyOk = true; // ✅ 本步拿到了地址
+                                logger("  └ 🔄 <b>接力棒更新</b> -> 準備交給下一步請求");
                             }
                         }
                     }
+                    // 🚀 【關鍵修正】：如果這是最後一個 Step 且拿到了數據
+                    if (i == stepCount - 1 && currentStepAnyOk) {
+                        finalStepSuccess = true;
+                    }
                 }
-            }
+                // --- 替換結束 ---
+            } 
 
             // --- 🚀 正常終點 ---
             String finalUrl = varPool.get("final_url");
-
-            // 判定邏輯：只要地址變了（說明 Step 跑通了），或者包含流媒體格式，就給 0 (直連)
             boolean finalHasStream = finalUrl.toLowerCase().contains(".m3u8") || finalUrl.toLowerCase().contains(".mp4");
-            int pValue = (finalHasStream || !finalUrl.equals(originalUrl)) ? 0 : 1;
+
+            // 🚀 判定邏輯：必須是最後一步成功(finalStepSuccess) 或者是 直接拿到了流媒體(finalHasStream)
+            int pValue = (finalStepSuccess || finalHasStream) ? 0 : 1;
+
+            // 🚀 如果判定嗅探(pValue=1)，URL 必須還原成原始 ID，否則殼子會去嗅探 Step 1 拿到的中間無效地址
+            String pushUrl = (pValue == 0) ? finalUrl : originalUrl;
 
             JSONObject resJson = new JSONObject();
             resJson.put("parse", pValue);
-            resJson.put("url", finalUrl);
+            resJson.put("url", pushUrl);
             resJson.put("header", getPlayHeaders(play));
 
             String result = resJson.toString();
-            
-            // ✅ 正常完成時，用綠色顯示最終 JSON，讓凱哥一眼看到結果
-            logger("<br>🏁 <b>[解析成功]</b> 推送 JSON:");
-            logger("<code style='color:#00FF00;'>" + result + "</code>");
-            
+            logger("<br>🏁 <b>[解析結束]</b> 最終決策: " + (pValue == 0 ? "✅ 直連" : "🔍 嗅探"));
+            logger("<code style='color:" + (pValue == 0 ? "#00FF00" : "#FF9900") + ";'>" + result + "</code>");
             return result;
 
         } catch (Exception e) {
-            // --- 🚨 異常保底 ---
-            // 這裡先把錯誤原因噴出來（紅色），方便凱哥查是哪一行崩了
             logger("<br>🚨 <b>[解析異常中斷]</b>: <span style='color:red;'>" + e.getMessage() + "</span>");
-            
-            JSONObject err = new JSONObject();
-            try {
-                // 崩潰時強制 parse: 1，讓殼子自己去嗅探原始地址
-                err.put("parse", 1);
-                err.put("url", originalUrl);
-                err.put("header", getPlayHeaders(new JSONObject()));
-            } catch (Exception ex) {
-                // 這裡基本不會崩，除非 originalUrl 也是空的
-            }
-            
-            String errResult = err.toString();
-            
-            // ✅ 即使崩潰了，也要把丟給殼子的保底 JSON 用紅色噴出來，防止盲目調試
-            logger("⚠️ <b>[觸發保底推送]</b>:");
-            logger("<code style='color:#FF0000;'>" + errResult + "</code>");
-            
-            return errResult;
+            return "{\"parse\":1,\"url\":\"" + originalUrl + "\",\"header\":{}}";
         }
-    } // 👈 這是 playerContent 方法的最末尾大括號
-
+    }
 
     // 🚀 配套的 Header 獲取方法（如果類末尾沒有就補上）
 private JSONObject getPlayHeaders(JSONObject play) {
@@ -395,14 +389,14 @@ private JSONObject getPlayHeaders(JSONObject play) {
     private String extract(Object root, String ruleStr) {
         try {
             if (TextUtils.isEmpty(ruleStr) || root == null) return "";
-            
+
             String finalResult = "";
 
             // 🚀 凱哥判定法：如果規則裡「不包含」&&，則認定為標準 CSS 規則，交給 Jsoup 處理
             if (!ruleStr.contains("&&")) {
                 if (root instanceof Element) {
                     Element el = (Element) root;
-                    
+
                     // A1. 處理帶 @ 的屬性提取 (如 a@href)
                     if (ruleStr.contains("@")) {
                         String[] parts = ruleStr.split("@");
@@ -419,7 +413,7 @@ private JSONObject getPlayHeaders(JSONObject play) {
                 }
                 // logger("📡 [Jsoup 原生模式] 規則: " + ruleStr + " | 結果: " + finalResult);
             } 
-            
+
             // 🚀 凱哥判定法：如果規則「包含」&&，則啟動全能工具 Java 進行切割
             else {
                 String content = (root instanceof Document) ? ((Document) root).outerHtml() 
@@ -428,7 +422,7 @@ private JSONObject getPlayHeaders(JSONObject play) {
 
                 KaiGeEngine.ExtractionResult res = 
                     KaiGeEngine.doExtract(content, ruleStr, this.siteUrl);
-                
+
                 finalResult = (res.value == null) ? "" : res.value;
                 // logger("🔪 [工具 Java 模式] 規則: " + ruleStr + " | 結果: " + finalResult);
             }
