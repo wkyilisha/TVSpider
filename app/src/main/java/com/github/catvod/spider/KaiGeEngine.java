@@ -139,25 +139,29 @@ public class KaiGeEngine {
 
     private static String cutWithWildcard(String html, String startRule, String end) {
         try {
-            // 🚀 1. 按照你的想法：分割 * 号左右两部分
-            String[] parts = startRule.split("\\*");
-            String head = parts[0]; // var config
-            String tail = parts.length > 1 ? parts[1] : ""; // url\":\"
+            // 🚀 核心：先清理規則裡的轉義斜槓，保證跟源碼字符像素級對齊
+            String cleanStart = startRule.replace("\\\"", "\"");
+            String cleanEnd = (end != null) ? end.replace("\\\"", "\"") : "";
 
-            // 🚀 2. 先找 head 的位置
+            // 🚀 1. 按照你的想法：分割 * 號左右兩部分
+            String[] parts = cleanStart.split("\\*");
+            String head = parts[0]; 
+            String tail = parts.length > 1 ? parts[1] : ""; 
+
+            // 🚀 2. 定位頭 (例如: var config)
             int headIdx = html.indexOf(head);
             if (headIdx == -1) return "";
 
-            // 🚀 3. 从 head 之后的位置开始找 tail
+            // 🚀 3. 從頭後面找尾 (例如: url":")
             int tailStartIdx = html.indexOf(tail, headIdx + head.length());
             if (tailStartIdx == -1) return "";
 
-            // 🚀 4. 找到 tail 的末尾，也就是数据开始的地方
+            // 🚀 4. 計算數據起點
             int dataStartIdx = tailStartIdx + tail.length();
 
-            // 🚀 5. 最后用 end (&& 后面的内容) 做切刀
-            if (isEmpty(end)) return html.substring(dataStartIdx).trim();
-            int endIdx = html.indexOf(end, dataStartIdx);
+            // 🚀 5. 用 end 作為切刀 (例如: " 號)
+            if (isEmpty(cleanEnd)) return html.substring(dataStartIdx).trim();
+            int endIdx = html.indexOf(cleanEnd, dataStartIdx);
             
             if (endIdx > -1) {
                 return html.substring(dataStartIdx, endIdx).trim();
@@ -167,6 +171,7 @@ public class KaiGeEngine {
         }
         return "";
     }
+
 
 
     private static String simpleCut(String html, String start, String end) {
