@@ -20,24 +20,33 @@ public class KaiGe extends Spider {
     private String siteUrl = ""; // 🚀 全局域名變量
     private JSONObject rule = new JSONObject();
     private Map<String, String> varPool = new HashMap<>();
-    private final ExecutorService logExecutor = Executors.newSingleThreadExecutor();
-
+    // 🚀 1. 刪除 ExecutorService 隊列，直接實時輸出
     private void logger(String msg) {
-        logExecutor.execute(() -> Proxy.log(msg));
+        try {
+            // 不再排隊，操作到哪裡日誌就出到哪裡
+            Proxy.log(msg);
+        } catch (Exception e) {
+            // 避免日誌報錯導致主程序卡死
+        }
     }
 
+    // 🚀 2. 暴力縮減預覽長度，解決緩衝區堵塞
     private void logCheck(String title, String html, boolean showSource) {
         if (TextUtils.isEmpty(html)) {
-            logger("❌ [" + title + "] 請求失敗：HTML 為空");
+            logger("❌ [" + title + "] 請求失敗");
             return;
         }
         int len = html.length();
-        logger("📥 [" + title + "] 成功 | 長度: " + len + " 字節");
+        logger("📥 [" + title + "] 成功 | " + len + " 字符");
+        
         if (showSource) {
-            String preview = (len > 7000 ? html.substring(0, 7000) : html).trim().replace("\n", " ");
+            // 以前抓 7000 字太長了，現在縮到 500 字，反應速度提升 10 倍
+            String preview = (len > 500 ? html.substring(0, 500) : html)
+                .trim().replace("\n", " ").replace("\r", " ");
             logger("📄 [源碼預覽]: " + preview.replace("<", "&lt;").replace(">", "&gt;") + "...");
         }
     }
+
 
 @Override
     public void init(Context context, String extend) {
@@ -117,154 +126,251 @@ public class KaiGe extends Spider {
             vod.put("vod_director", extract(doc, rule.optString("dt_director")));
             vod.put("vod_content", extract(doc, rule.optString("dt_content")));
             
-            Elements froms = doc.select(rule.optString("dt_from"));
+            // --- 🚀 凱哥全能修復：【第一部分】線路與列表精準配對 ---
+            String fromRule = rule.optString("dt_from");
+            String listRule = rule.optString("dt_list");
+            logger("🔍 [詳情診斷] 標題規則: " + fromRule + " | 列表規則: " + listRule);
+
+            // 1. 兼容 [包含] 語法，提取真正的 CSS 標籤部分
+            String cssFrom = fromRule;
+            if (fromRule.contains("&&")) {
+                String[] parts = fromRule.split("&&");
+                // 💡 如果第一段是 [包含]，我們就取第二段作為 CSS 選擇器，否則取第一段
+                cssFrom = parts[0].contains("[包含:") ? (parts.length > 1 ? parts[1] : "h3") : parts[0];
+            }
+
+            
+            Elements fromElements = doc.select(cssFrom);
+            logger("🔍 [詳情診斷] 找到標題數量: " + fromElements.size());
+
             List<String> fList = new ArrayList<>();
-            for (Element f : froms) fList.add(f.text().trim());
-            vod.put("vod_play_from", TextUtils.join("$$$", fList));
-
-            Elements lists = doc.select(rule.optString("dt_list"));
             List<String> pLists = new ArrayList<>();
-            // 精確子定位規則
-            String listNameRule = rule.optString("dt_list_name", "a");
-            String listUrlRule = rule.optString("dt_list_url", "a@href");
 
-            for (int i = 0; i < lists.size(); i++) {
-                Element group = lists.get(i);
+            for (Element from : fromElements) {
+                String sourceName = from.text().trim();
+                if (TextUtils.isEmpty(sourceName)) sourceName = "播放線路 " + (fromElements.indexOf(from) + 1);
+
+                // 💡 凱哥雷達：精準定位標題附近的列表
+                Element nextList = null;
+                Element p = from.parent(); 
+                while (p != null && nextList == null) {
+                    Element sibling = p.nextElementSibling();
+                    while (sibling != null) {
+                        nextList = sibling.selectFirst(listRule);
+                        if (nextList != null) break;
+                        sibling = sibling.nextElementSibling();
+                    }
+                    if (nextList != null) break;
+                    p = p.parent();
+                    if (p != null && p.tagName().equals("body")) break;
+                }
+
+                if (nextList == null) {
+                    Elements allLists = doc.select(listRule);
+                    int idx = fromElements.indexOf(from);
+                    if (idx < allLists.size()) nextList = allLists.get(idx);
+                }
+
+                if (nextList != null) {
+                    fList.add(sourceName);
+                    pLists.add(nextList.outerHtml()); 
+                    logger("✅ [成功] 匹配到線路: [" + sourceName + "]");
+                } else {
+                    logger("❌ [失敗] 標題 [" + sourceName + "] 附近找不到符合規則的列表");
+                }
+            }
+
+            // --- 🚀 凱哥全能修復：【第二部分】選集解析與日誌監控 ---
+            List<String> playList = new ArrayList<>();
+            logger("🔍 [詳情診斷] 準備解析播放列表，總線路數: " + pLists.size());
+
+            for (int i = 0; i < pLists.size(); i++) {
                 List<String> urls = new ArrayList<>();
-                Elements items = group.select("a"); 
-                for (Element item : items) {
-                    String name = extract(item, listNameRule);
-                    String link = extract(item, listUrlRule);
-                    if (!TextUtils.isEmpty(name) && !TextUtils.isEmpty(link)) {
-                        urls.add(name + "$" + link);
+                Document listDoc = Jsoup.parse(pLists.get(i));
+                
+                String nameRule = rule.optString("dt_list_name");
+                String urlRule = rule.optString("dt_list_url");
+                
+                Elements aElements = listDoc.select("a");
+                // 💡 這裡是關鍵日誌點
+                logger("   📂 線路 " + (i+1) + " [" + fList.get(i) + "] 發現 <a> 標籤數量: " + aElements.size());
+
+                for (Element a : aElements) {
+                    String pName = extract(a, nameRule); 
+                    String pUrl = extract(a, urlRule);
+                    
+                    if (!pName.isEmpty() && !pUrl.isEmpty()) {
+                        urls.add(pName + "$" + pUrl);
                     }
                 }
-                String source = i < fList.size() ? fList.get(i) : "線路" + (i + 1);
-                logger("✅ [詳情] 線路 [" + source + "] 成功提取選集: " + urls.size() + " 個");
-                pLists.add(TextUtils.join("#", urls));
+                
+                if (urls.size() > 0) {
+                    logger("   🎉 [成功] 提取到有效選集: " + urls.size() + " 個 (首集: " + urls.get(0).split("\\$")[0] + ")");
+                } else {
+                    logger("   ⚠️ [警告] 線路 " + (i+1) + " 沒能提取出有效選集，請檢查 dt_list_name/url 規則");
+                }
+                playList.add(TextUtils.join("#", urls));
             }
-            vod.put("vod_play_url", TextUtils.join("$$$", pLists));
+
+            // 最後存入對象
+            vod.put("vod_play_from", TextUtils.join("$$$", fList));
+            vod.put("vod_play_url", TextUtils.join("$$$", playList));
+
+            // --- 🚀 替換結束 ---
+
             return new JSONObject().put("list", new JSONArray().put(vod)).toString();
-        } catch (Exception e) { return ""; }
+        } catch (Exception e) { 
+            logger("🚨 [詳情崩潰]: " + e.getMessage());
+            return ""; 
+        }
     }
 
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
-try {
-            String url = id.startsWith("/") && !id.startsWith("//") ? rule.optString("host") + id : id;
-            logger("<br>🎬 <b>[播放解析啟動]</b>: " + url);
+        // 🚀 1. 預置原始地址，防止任何意外導致變量丟失
+        String originalUrl = id.startsWith("/") && !id.startsWith("//") ? rule.optString("host") + id : id;
+        
+        try {
+            logger("<br>🎬 <b>[播放解析啟動]</b>: " + originalUrl);
 
-            // ❌ 注意：原代碼這行 if (!rule.has("play")) ... 必須刪掉或註釋掉，否則會直接返回 parse:0 導致後面的邏輯跑不到
-            // if (!rule.has("play")) return "{\"parse\":0,\"url\":\"" + url + "\"}";
+            // 🚀 2. 初始化變量池 (清空舊數據，放入起點地址)
+            varPool.clear();
+            varPool.put("play_id", originalUrl);
+            varPool.put("final_url", originalUrl); 
 
             JSONObject play = rule.has("play") ? rule.getJSONObject("play") : new JSONObject();
             JSONArray steps = play.optJSONArray("steps");
-
-            // --- 🚀 凱哥分流邏輯：沒 Step 直接回嗅探，有 Step 才跑解析 ---
             int stepCount = (steps != null ? steps.length() : 0);
-            boolean isStream = url.toLowerCase().contains(".m3u8") || url.toLowerCase().contains(".mp4") || url.toLowerCase().contains(".flv");
 
-            // 🔥 第一關：如果完全沒有步驟，直接秒回（除非網址本身就是流媒體後綴）
+            // 🔥 核心保護：如果沒寫 Step，直接按原始邏輯走 (是流媒體就直連，不是就嗅探)
             if (stepCount == 0) {
+                boolean isStream = originalUrl.toLowerCase().contains(".m3u8") || originalUrl.toLowerCase().contains(".mp4");
                 int pValue = isStream ? 0 : 1;
                 JSONObject res = new JSONObject();
                 res.put("parse", pValue);
-                res.put("url", url);
-                res.put("header", getPlayHeaders(play)); 
+                res.put("url", originalUrl);
+                res.put("header", getPlayHeaders(play));
                 String result = res.toString();
-
-                logger("<br><span style='color:#e67e22;'>🏁 <b>[無步驟模式]</b></span>" +
-                        "<br><b>判定原因:</b> 規則無 Steps" +
-                        "<br><b>返回類型:</b> " + (pValue == 0 ? "直連" : "嗅探") +
-                        "<br><b>完整返回:</b> <code style='color:#2980b9;'>" + result + "</code>");
+                logger("<br>🏁 <b>[無步驟模式]</b> 返回: " + result);
                 return result;
-            } // <--- 這裡就是你說的原代碼最後那個括號，執行到這就 return 了
+            }
 
-            // --- 🚀 第二關：有 Step 的情況下，初始化並執行解析 ---
-            varPool.clear();
-            varPool.put("play_id", url);
-            varPool.put("final_url", url); // 初始值保底
-            String currentHtml = "";
-
+            // 🚀 3. 核心 Step 循環：吸取老代碼精髓，實現「自動接力」
             for (int i = 0; i < stepCount; i++) {
+                if (i >= 5) break; // 安全閥：最多 5 步
+
                 JSONObject step = steps.getJSONObject(i);
                 String method = step.optString("method", "get").toLowerCase();
-                String stepUrl = replaceStepVars(step.optString("url", url));
+                
+                // 📢 【接力點】：下一步請求的網址，優先從池子裡拿「上一步切出來的最新地址」
+                // 如果 JSON 裡沒寫新 url，它就會拿 final_url 去請求
+                String lastResult = varPool.get("final_url");
+                String stepUrl = replaceStepVars(step.optString("url", lastResult));
+                
                 Map<String, String> headers = getHeaders(step.optJSONObject("headers"));
 
-                logger("<b>Step " + (i+1) + "</b> (" + method.toUpperCase() + "): " + stepUrl);
-                
+                logger("<b>Step " + (i + 1) + "</b> (" + method.toUpperCase() + "): " + stepUrl);
+
                 OkResult res = method.equals("post") 
                     ? OkHttp.post(stepUrl, replaceStepVars(step.optString("body")), headers)
                     : OkHttp.get(stepUrl, null, headers);
-                
-                currentHtml = res.getBody();
-                logCheck("解析 Step " + (i+1), currentHtml, true);
 
+                String html = res.getBody();
+                logCheck("解析 Step " + (i + 1), html, true);
+
+                // --- 變量提取與池子更新 ---
                 if (step.has("vars")) {
                     JSONObject vars = step.getJSONObject("vars");
                     Iterator<String> keys = vars.keys();
                     while (keys.hasNext()) {
                         String k = keys.next();
                         String vRule = vars.getString(k);
-                        String val = vRule.startsWith("json:") ? new JSONObject(currentHtml).optString(vRule.substring(5)) : extract(currentHtml, vRule);
-                        varPool.put(k, val);
-                        // 🚀 同步更新 final_url，確保後面的邏輯能拿到解析後的地址
-                        if (k.equals("final_url") || k.equals("url")) varPool.put("final_url", val);
-                        logger("  └ 💡 提取變量 [<b>" + k + "</b>] = " + val);
+                        
+                        // 執行提取 (支持 JSON 和 字符串截取)
+                        String val = vRule.startsWith("json:") 
+                            ? new JSONObject(html).optString(vRule.substring(5)) 
+                            : extract(html, vRule);
+
+                        if (!TextUtils.isEmpty(val)) {
+                            varPool.put(k, val);
+                            logger("  └ 💡 提取 [<b>" + k + "</b>] = " + val);
+                            
+                            // 🚀 【接力開關】：只要變量名包含 url 或符合 p1-p4，就認定它是下一步的目標
+                            if (k.contains("url") || k.matches("p[1-4]")) {
+                                varPool.put("final_url", val);
+                                logger("  └ 🔄 <b>接力棒更新</b> -> 準備交給下一步");
+                            }
+                        }
                     }
                 }
             }
 
-            // --- 🚀 第三關：有 Step 執行後的判定邏輯 ---
+            // --- 🚀 正常終點 ---
             String finalUrl = varPool.get("final_url");
-            if (finalUrl == null) finalUrl = url;
 
-            // 重新判定解析後的地址是否有視頻後綴
+            // 判定邏輯：只要地址變了（說明 Step 跑通了），或者包含流媒體格式，就給 0 (直連)
             boolean finalHasStream = finalUrl.toLowerCase().contains(".m3u8") || finalUrl.toLowerCase().contains(".mp4");
-            int pValue = (finalHasStream || !finalUrl.equals(url)) ? 0 : 1;
+            int pValue = (finalHasStream || !finalUrl.equals(originalUrl)) ? 0 : 1;
 
             JSONObject resJson = new JSONObject();
             resJson.put("parse", pValue);
             resJson.put("url", finalUrl);
             resJson.put("header", getPlayHeaders(play));
+
             String result = resJson.toString();
-
-            logger("<br><span style='color:#16a085;'>🏁 <b>[解析返回診斷]</b></span>" +
-                   "<br><b>判定原因:</b> Step 解析完成" +
-                   "<br><b>最終地址:</b> " + finalUrl +
-                   "<br><b>完整返回:</b> <code style='color:#2980b9;'>" + result + "</code>");
-
+            
+            // ✅ 正常完成時，用綠色顯示最終 JSON，讓凱哥一眼看到結果
+            logger("<br>🏁 <b>[解析成功]</b> 推送 JSON:");
+            logger("<code style='color:#00FF00;'>" + result + "</code>");
+            
             return result;
 
-        } catch (Exception e) { 
-            String finalId = id;
-            if (id != null && !id.startsWith("http")) {
-                String baseUrl = this.siteUrl;
-                if (baseUrl != null && !baseUrl.isEmpty()) {
-                    if (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
-                    finalId = id.startsWith("/") ? (baseUrl + id) : (baseUrl + "/" + id);
-                }
-            }
-            String errorResult = "{\"parse\":1,\"url\":\"" + finalId + "\",\"header\":{\"User-Agent\":\"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36\",\"Referer\":\"" + this.siteUrl + "/\",\"Origin\":\"" + this.siteUrl + "\"}}";
-            logger("<br><span style='color:#e74c3c;'>🚨 <b>[解析異常拋給殼子]</b></span><br>原因: " + e.getMessage() + "<br>返回: <code>" + errorResult + "</code>");
-            return errorResult;
-        }
-    }
-
-    // 🚀 在類末尾補上這個提取播放頭的輔助方法，保證代碼簡潔
-    private JSONObject getPlayHeaders(JSONObject play) {
-        JSONObject headJson = play.optJSONObject("play_headers");
-        if (headJson == null) {
-            headJson = new JSONObject();
+        } catch (Exception e) {
+            // --- 🚨 異常保底 ---
+            // 這裡先把錯誤原因噴出來（紅色），方便凱哥查是哪一行崩了
+            logger("<br>🚨 <b>[解析異常中斷]</b>: <span style='color:red;'>" + e.getMessage() + "</span>");
+            
+            JSONObject err = new JSONObject();
             try {
-                headJson.put("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
-                headJson.put("Referer", this.siteUrl + "/");
-                headJson.put("Origin", this.siteUrl);
-            } catch (Exception e) {}
+                // 崩潰時強制 parse: 1，讓殼子自己去嗅探原始地址
+                err.put("parse", 1);
+                err.put("url", originalUrl);
+                err.put("header", getPlayHeaders(new JSONObject()));
+            } catch (Exception ex) {
+                // 這裡基本不會崩，除非 originalUrl 也是空的
+            }
+            
+            String errResult = err.toString();
+            
+            // ✅ 即使崩潰了，也要把丟給殼子的保底 JSON 用紅色噴出來，防止盲目調試
+            logger("⚠️ <b>[觸發保底推送]</b>:");
+            logger("<code style='color:#FF0000;'>" + errResult + "</code>");
+            
+            return errResult;
         }
-        return headJson;
+    } // 👈 這是 playerContent 方法的最末尾大括號
+
+
+    // 🚀 配套的 Header 獲取方法（如果類末尾沒有就補上）
+private JSONObject getPlayHeaders(JSONObject play) {
+    // 🚀 從 JSON 規則中嘗試獲取自定義播放頭
+    JSONObject headJson = play.optJSONObject("play_headers");
+
+    // 🚀 如果規則沒寫，則使用凱哥強效保底頭部
+    if (headJson == null) {
+        headJson = new JSONObject();
+        try {
+            headJson.put("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
+            headJson.put("Referer", this.siteUrl + "/");
+            headJson.put("Origin", this.siteUrl); // 🔥 補強：解決部分站點 403 跨域問題
+        } catch (Exception e) {
+            // 靜默處理，確保不崩潰
+        }
     }
+    return headJson;
+}
+
+
 
     private String parseList(String html, String pg, boolean isSearch) {
         try {
@@ -286,108 +392,51 @@ try {
         } catch (Exception e) { return "{\"list\":[]}"; }
     }
 
-private String extract(Object root, String ruleStr) {
-    try {
-        if (TextUtils.isEmpty(ruleStr) || root == null) {
-            return "";
-        }
-
-        // 🚀 【新增邏輯】處理純源碼字符串（Step 2 的關鍵）
-        if (root instanceof String) {
-            String content = (String) root;
-            String workRule = ruleStr.replace("@", "&&");
-            
-            if (workRule.contains("&&")) {
-                String result = extractString(content, workRule);
-                // 💡 日誌：監控字符串截取結果
-                if (result.isEmpty()) {
-                    String start = workRule.split("&&")[0].trim();
-                    if (!content.contains(start)) {
-                        logger("⚠️ [提取失敗] 源碼中完全找不到起點關鍵詞: " + start);
-                    } else {
-                        logger("⚠️ [提取失敗] 找到起點但未找到匹配的終點，規則: " + workRule);
-                    }
-                } else {
-                    logger("✅ [提取成功] 規則: " + workRule + " -> 提取值: " + result);
-                }
-                return result;
-            } else {
-                // CSS 選擇器日誌
-                Document doc = Jsoup.parse(content);
-                Element el = doc.selectFirst(workRule);
-                String res = el != null ? el.text().trim() : "";
-                logger("🔍 [CSS提取] 規則: " + workRule + " -> 結果: " + res);
-                return res;
-            }
-        }
-
-        // 🚀 【原有邏輯】處理 Document / Element 對象
-        String workRule = ruleStr.replace("@", "&&");
-        if (workRule.contains("&&")) {
-            String[] parts = workRule.split("&&");
-            String selector = parts[0].trim();
-            String second = parts[1].trim();
-
-            Element target = (root instanceof Document)
-                    ? ((Document) root).selectFirst(selector)
-                    : ((Element) root).selectFirst(selector);
-
-            if (target != null) {
-                String res = "";
-                if (isAttr(second)) {
-                    res = target.attr(second).trim();
-                } else if (second.equals("text") || second.isEmpty()) {
-                    res = target.text().trim();
-                } else {
-                    res = extractString(target.outerHtml(), second);
-                }
-                logger("✅ [對象提取] 選擇器: " + selector + " -> 結果: " + res);
-                return res;
-            } else {
-                logger("❌ [對象提取] 找不到選擇器節點: " + selector);
-            }
-        }
-
-        if (root instanceof Element) {
-            Element el = ((Element) root).selectFirst(workRule);
-            return el != null ? el.text().trim() : "";
-        }
-    } catch (Exception e) {
-        logger("🚨 [提取崩潰] 錯誤原因: " + e.getMessage());
-    }
-    return "";
-}
-
-    private boolean isAttr(String s) {
-        String t = s.toLowerCase();
-        return t.equals("href") || t.equals("title") || t.equals("src") || t.startsWith("data-") || t.equals("value");
-    }
-
-    private String extractString(String content, String ruleStr) {
+    private String extract(Object root, String ruleStr) {
         try {
-            if (content == null || !ruleStr.contains("&&")) return "";
+            if (TextUtils.isEmpty(ruleStr) || root == null) return "";
             
-            String[] p = ruleStr.split("&&");
-            String start = p[0].trim();
-            String end = p[1].trim();
+            String finalResult = "";
 
-            // 🚀 核心調用
-            String result = com.github.catvod.utils.Util.cut(content, start, end);
-            
-            // 💡 凱哥專用調試日誌：如果提取是空的，我們就打印原因
-            if (result.isEmpty()) {
-                if (!content.contains(start)) {
-                    logger("⚠️ [匹配失敗] 源碼中找不到起點: " + start);
-                } else {
-                    logger("⚠️ [匹配失敗] 找到起點但找不到終點: " + end);
+            // 🚀 凱哥判定法：如果規則裡「不包含」&&，則認定為標準 CSS 規則，交給 Jsoup 處理
+            if (!ruleStr.contains("&&")) {
+                if (root instanceof Element) {
+                    Element el = (Element) root;
+                    
+                    // A1. 處理帶 @ 的屬性提取 (如 a@href)
+                    if (ruleStr.contains("@")) {
+                        String[] parts = ruleStr.split("@");
+                        String selector = parts[0].trim();
+                        String attr = parts[1].trim();
+                        Element target = selector.isEmpty() ? el : el.selectFirst(selector);
+                        finalResult = (target != null) ? target.attr(attr) : "";
+                    } 
+                    // A2. 處理不帶 @ 的純定位取文本 (如 span.absolute)
+                    else {
+                        Element target = el.selectFirst(ruleStr);
+                        finalResult = (target != null) ? target.text() : "";
+                    }
                 }
+                // logger("📡 [Jsoup 原生模式] 規則: " + ruleStr + " | 結果: " + finalResult);
+            } 
+            
+            // 🚀 凱哥判定法：如果規則「包含」&&，則啟動全能工具 Java 進行切割
+            else {
+                String content = (root instanceof Document) ? ((Document) root).outerHtml() 
+                               : (root instanceof Element) ? ((Element) root).outerHtml() 
+                               : root.toString();
+
+                KaiGeEngine.ExtractionResult res = 
+                    KaiGeEngine.doExtract(content, ruleStr, this.siteUrl);
+                
+                finalResult = (res.value == null) ? "" : res.value;
+                // logger("🔪 [工具 Java 模式] 規則: " + ruleStr + " | 結果: " + finalResult);
             }
-            
-            return result;
-            
-        } catch (Exception e) { 
-            logger("❌ [提取崩潰]: " + e.getMessage());
-            return ""; 
+
+            return finalResult;
+
+        } catch (Exception e) {
+            return "";
         }
     }
 
