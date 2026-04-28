@@ -353,8 +353,47 @@ public class KG extends Spider {
         return hb;
     }
 
-    @Override
-    public String homeContent(boolean filter) {
-        try { return new JSONObject().put("class", rule.optJSONArray("classes")).toString(); } catch (Exception e) { return ""; }
+@Override
+public String homeContent(boolean filter) {
+    try {
+        logger("🏠 [主頁] 正在加載分類導航...");
+        JSONArray classes = rule.optJSONArray("classes");
+        
+        if (classes == null || classes.length() == 0) {
+            logger("🚨 [主頁] 警告：JSON 規則中未定義 classes 或格式錯誤");
+            return "";
+        }
+
+        // 🚀 凱哥特製：字段自動對接
+        // 很多 JSON 寫的是 type_name/type_id，有些殼子要的是 name/id
+        // 我們在這裡做一個轉換，保證 100% 顯示
+        JSONArray resultClasses = new JSONArray();
+        for (int i = 0; i < classes.length(); i++) {
+            JSONObject oldCate = classes.getJSONObject(i);
+            JSONObject newCate = new JSONObject();
+            
+            String name = oldCate.optString("type_name", oldCate.optString("name"));
+            String id = oldCate.optString("type_id", oldCate.optString("id"));
+            
+            newCate.put("type_name", name);
+            newCate.put("type_id", id);
+            resultClasses.put(newCate);
+        }
+
+        logger("✅ [主頁] 分類加載成功，共 " + resultClasses.length() + " 個頻道");
+        
+        JSONObject result = new JSONObject();
+        result.put("class", resultClasses);
+        
+        // 如果規則裡有篩選數據(filters)，也可以在這裡放進去
+        if (rule.has("filters")) {
+            result.put("filters", rule.optJSONObject("filters"));
+        }
+        
+        return result.toString();
+    } catch (Exception e) {
+        logger("🚨 [主頁異常]: " + e.getMessage());
+        return "";
     }
+}
 }
