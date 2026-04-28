@@ -277,7 +277,7 @@ public class KaiGe extends Spider {
                 String html = res.getBody();
                 logCheck("解析 Step " + (i + 1), html, true);
 
-                // 🚀 【核心提取】：不管變量叫什麼，提取到就更新接力棒
+                // 🚀 凱哥「絕不失真」暴力提取
                 JSONObject vars = step.optJSONObject("vars");
                 if (vars != null) {
                     for (Iterator<String> it = vars.keys(); it.hasNext(); ) {
@@ -287,25 +287,42 @@ public class KaiGe extends Spider {
 
                         if (vRule.startsWith("json:")) {
                             try { val = new JSONObject(html).optString(vRule.substring(5)); } catch (Exception e) { val = ""; }
-                        } else {
-                            // 調用凱哥引擎 2.0 進行切割
-                            KaiGeEngine.ExtractionResult engineRes = KaiGeEngine.doExtract(html, vRule, this.siteUrl);
-                            val = engineRes.value;
+                        } else if (vRule.contains("&&")) {
+                            try {
+                                String[] rules = vRule.split("&&");
+                                if (rules.length >= 2) {
+                                    String start = rules[0];
+                                    String end = rules[1];
+                                    int sIdx = html.indexOf(start);
+                                    if (sIdx != -1) {
+                                        sIdx += start.length();
+                                        int eIdx = html.indexOf(end, sIdx);
+                                        if (eIdx != -1) {
+                                            // 🛡️ 核心改動：直接截取，不做任何 trim() 以外的騷操作
+                                            val = html.substring(sIdx, eIdx).trim();
+                                        }
+                                    }
+                                }
+                            } catch (Exception e) { val = ""; }
                         }
 
-                        if (!android.text.TextUtils.isEmpty(val)) {
-                            // 存入變量池供後續 Step 引用 (如 {p_url})
+                        // 如果原生截取都拿不到，才讓引擎去試
+                        if (android.text.TextUtils.isEmpty(val)) {
+                            val = KaiGeEngine.doExtract(html, vRule, this.siteUrl).value;
+                        }
+
+                        // 🏁 只要 val 裡面真的有字（哪怕是空格以外的字符）
+                        if (val != null && !val.isEmpty()) {
                             varPool.put(k, val);
-                            
-                            // 🚀 【接力棒更新】：只要這步提到了東西，它就是目前的「最終地址」
                             varPool.put("final_url", val); 
-                            
-                            logger("  └ ✅ [提取成功] [<b>" + k + "</b>] = " + val);
+                            // 🚀 日誌加強：用引號包裹，看看到底有沒有拿到東西
+                            logger("  └ ✅ [提取成功] [<b>" + k + "</b>] = \"<span style='color:#00FF00;'>" + val + "</span>\"");
                         } else {
-                            logger("  └ ❌ [提取失敗] 鍵: " + k);
+                            logger("  └ ❌ [提取失敗] 鍵: " + k + " | 規則: " + vRule);
                         }
                     }
                 }
+
             } 
 
             // --- 🚀 正常終點判定 ---
