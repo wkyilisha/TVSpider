@@ -277,51 +277,63 @@ public class KaiGe extends Spider {
                 String html = res.getBody();
                 logCheck("解析 Step " + (i + 1), html, true);
 
-                // 🚀 凱哥「絕不失真」暴力提取
+                // 🚀 凱哥「地毯式」提取器：絕不跳過，必出日誌
                 JSONObject vars = step.optJSONObject("vars");
                 if (vars != null) {
-                    for (Iterator<String> it = vars.keys(); it.hasNext(); ) {
+                    Iterator<String> it = vars.keys();
+                    while (it.hasNext()) {
                         String k = it.next();
                         String vRule = vars.optString(k);
                         String val = "";
 
-                        if (vRule.startsWith("json:")) {
-                            try { val = new JSONObject(html).optString(vRule.substring(5)); } catch (Exception e) { val = ""; }
-                        } else if (vRule.contains("&&")) {
+                        // 📢 關鍵日誌：證明 Java 確實跑到了這一步
+                        logger("  🔎 [Java 提取中] 鍵: " + k + " | 規則: " + vRule);
+
+                        if (vRule.contains("&&")) {
                             try {
                                 String[] rules = vRule.split("&&");
-                                if (rules.length >= 2) {
-                                    String start = rules[0];
-                                    String end = rules[1];
-                                    int sIdx = html.indexOf(start);
-                                    if (sIdx != -1) {
-                                        sIdx += start.length();
-                                        int eIdx = html.indexOf(end, sIdx);
-                                        if (eIdx != -1) {
-                                            // 🛡️ 核心改動：直接截取，不做任何 trim() 以外的騷操作
-                                            val = html.substring(sIdx, eIdx).trim();
-                                        }
+                                String start = rules[0];
+                                String end = rules[1];
+                                
+                                // 💡 遍歷搜索：防止被第一個錯誤的標籤干擾
+                                int curPos = 0;
+                                while (curPos < html.length()) {
+                                    int sIdx = html.indexOf(start, curPos);
+                                    if (sIdx == -1) break; // 徹底找不到了
+                                    
+                                    sIdx += start.length();
+                                    int eIdx = html.indexOf(end, sIdx);
+                                    if (eIdx == -1) break; // 沒有結尾，跳出
+                                    
+                                    String tmp = html.substring(sIdx, eIdx).trim();
+                                    if (!tmp.isEmpty()) {
+                                        val = tmp; // 抓到了有意義的內容
+                                        break; 
                                     }
+                                    curPos = sIdx; // 如果抓到的是空，往後繼續搜下一個標籤
                                 }
-                            } catch (Exception e) { val = ""; }
+                            } catch (Exception e) {
+                                logger("  └ 🚨 [截取崩潰]: " + e.getMessage());
+                            }
                         }
 
-                        // 如果原生截取都拿不到，才讓引擎去試
-                        if (android.text.TextUtils.isEmpty(val)) {
+                        // 如果原生截取失敗，再給引擎一個機會
+                        if (TextUtils.isEmpty(val)) {
                             val = KaiGeEngine.doExtract(html, vRule, this.siteUrl).value;
                         }
 
-                        // 🏁 只要 val 裡面真的有字（哪怕是空格以外的字符）
-                        if (val != null && !val.isEmpty()) {
+                        // 🏁 強制輸出結果
+                        if (!TextUtils.isEmpty(val)) {
                             varPool.put(k, val);
-                            varPool.put("final_url", val); 
-                            // 🚀 日誌加強：用引號包裹，看看到底有沒有拿到東西
-                            logger("  └ ✅ [提取成功] [<b>" + k + "</b>] = \"<span style='color:#00FF00;'>" + val + "</span>\"");
+                            varPool.put("final_url", val);
+                            logger("  └ ✅ [成功] -> " + val);
                         } else {
-                            logger("  └ ❌ [提取失敗] 鍵: " + k + " | 規則: " + vRule);
+                            logger("  └ ❌ [失敗] -> 源碼中未找到符合內容");
+                            varPool.remove(k); // 提取失敗必須清除舊值
                         }
                     }
                 }
+
 
             } 
 
