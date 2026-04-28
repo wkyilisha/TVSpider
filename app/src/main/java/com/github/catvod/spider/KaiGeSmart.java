@@ -21,7 +21,7 @@ public class KaiGeSmart {
             vod.put("vod_id",   findUrl(el));
             String remarks = el.select(".remarks, .state, .pic-text, .tag, .text-right").text().trim();
             vod.put("vod_remarks", remarks);
-        } catch (Exception e) {}
+        } catch (Exception ignored) {}
         return vod;
     }
 
@@ -29,7 +29,6 @@ public class KaiGeSmart {
     public static JSONObject parseDetail(String html) {
         JSONObject vod = new JSONObject();
         try {
-            // 🛡️ 修正點：使用 Jsoup.parse
             Document doc = Jsoup.parse(html);
             vod.put("vod_name", findTitle(doc));
             vod.put("vod_pic",  findPic(doc));
@@ -42,35 +41,38 @@ public class KaiGeSmart {
             vod.put("vod_content",  findContent(doc));
 
             processPlaylist(doc, vod);
-        } catch (Exception e) {}
+        } catch (Exception ignored) {}
         return vod;
     }
 
     private static void processPlaylist(Document doc, JSONObject vod) {
-        List<String> fromList = new ArrayList<>();
-        List<String> urlList = new ArrayList<>();
-        Elements tabs = doc.select(".tabs li, .line-title, .from-list li, [data-line]");
-        Elements blocks = doc.select(".playlist, .content_playlist, .play-list-box, #playlist");
+        try {
+            List<String> fromList = new ArrayList<>();
+            List<String> urlList = new ArrayList<>();
+            Elements tabs = doc.select(".tabs li, .line-title, .from-list li, [data-line]");
+            Elements blocks = doc.select(".playlist, .content_playlist, .play-list-box, #playlist");
 
-        if (blocks.isEmpty()) {
-            String links = findAllLinks(doc);
-            if (!links.isEmpty()) {
-                fromList.add("默認線路");
-                urlList.add(links);
-            }
-        } else {
-            for (int i = 0; i < blocks.size(); i++) {
-                String name = (i < tabs.size()) ? tabs.get(i).text().trim() : "";
-                if (TextUtils.isEmpty(name)) name = "線路 " + (i + 1);
-                String links = findAllLinks(blocks.get(i));
+            if (blocks.isEmpty()) {
+                String links = findAllLinks(doc);
                 if (!links.isEmpty()) {
-                    fromList.add(name);
+                    fromList.add("默認線路");
                     urlList.add(links);
                 }
+            } else {
+                for (int i = 0; i < blocks.size(); i++) {
+                    String name = (i < tabs.size()) ? tabs.get(i).text().trim() : "";
+                    if (TextUtils.isEmpty(name)) name = "線路 " + (i + 1);
+                    String links = findAllLinks(blocks.get(i));
+                    if (!links.isEmpty()) {
+                        fromList.add(name);
+                        urlList.add(links);
+                    }
+                }
             }
-        }
-        vod.put("vod_play_from", TextUtils.join("$$$", fromList));
-        vod.put("vod_play_url",  TextUtils.join("###", urlList));
+            // 🛡️ 這裡加了 try-catch 以修復之前的 Compilation FAILED
+            vod.put("vod_play_from", TextUtils.join("$$$", fromList));
+            vod.put("vod_play_url",  TextUtils.join("###", urlList));
+        } catch (Exception ignored) {}
     }
 
     public static String findPic(Element el) {
