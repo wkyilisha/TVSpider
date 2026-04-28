@@ -261,22 +261,47 @@ public class KaiGe extends Spider {
                 if (i >= 5) break; // 安全閥：最多 5 步
 
                 JSONObject step = steps.getJSONObject(i);
-                String method = step.optString("method", "get").toLowerCase();
-
-                // 📢 【接力點】：下一步請求的網址，優先從池子裡拿「上一步切出來的最新地址」
-                // 如果 JSON 裡沒寫新 url，它就會拿 final_url 去請求
+                
+                // --- 🚀 開始替換：獲取當前步驟的網址、方法和頭部 ---
                 String lastResult = varPool.get("final_url");
-                String stepUrl = replaceStepVars(step.optString("url", lastResult));
+                String stepUrl = replaceStepVars(step.optString("url", lastResult)); // 確保有網址
+                String method = step.optString("method", "get").toLowerCase();
+                Map<String, String> headers = getHeaders(step.optJSONObject("headers")); // 確保有頭部
 
-                Map<String, String> headers = getHeaders(step.optJSONObject("headers"));
+                logger("<br><b>Step " + (i + 1) + "</b> (" + method.toUpperCase() + "): " + stepUrl);
 
-                logger("<b>Step " + (i + 1) + "</b> (" + method.toUpperCase() + "): " + stepUrl);
+                OkResult res;
+                if (method.equalsIgnoreCase("post")) {
+                    String bodyStr = replaceStepVars(step.optString("body"));
+                    // 凱哥日誌：發送前確認內容
+                    logger("📝 [POST Body]: " + bodyStr);
 
-                OkResult res = method.equals("post") 
-                    ? OkHttp.post(stepUrl, replaceStepVars(step.optString("body")), headers)
-                    : OkHttp.get(stepUrl, null, headers);
+                    if (!bodyStr.isEmpty() && !bodyStr.startsWith("{")) {
+                        // 智能轉換：將 url=1&time=2 轉為 Map 發送表單
+                        Map<String, String> bodyMap = new HashMap<>();
+                        try {
+                            for (String pair : bodyStr.split("&")) {
+                                String[] kv = pair.split("=", 2);
+                                if (kv.length == 2) bodyMap.put(kv[0], kv[1]);
+                            }
+                            logger("📦 [智能轉換] 已轉為 Map (Form表單) 發送");
+                            res = OkHttp.post(stepUrl, bodyMap, headers);
+                        } catch (Exception e) {
+                            logger("⚠️ [轉換失敗] 降級原始發送: " + e.getMessage());
+                            res = OkHttp.post(stepUrl, bodyStr, headers);
+                        }
+                    } else {
+                        // JSON 格式或空 Body 直接發送
+                        res = OkHttp.post(stepUrl, bodyStr, headers);
+                    }
+                } else {
+                    // 🚀 GET 請求：原封不動
+                    res = OkHttp.get(stepUrl, null, headers);
+                }
+                // --- 🚀 替換結束 ---
 
-String html = res.getBody();
+                String html = res.getBody();
+
                 logCheck("解析 Step " + (i + 1), html, true);
 
                 // 🚀 【關鍵修正】：必須先從當前 step 提取 vars 對象，否則下面會報錯
