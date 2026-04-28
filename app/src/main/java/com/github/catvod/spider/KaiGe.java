@@ -346,6 +346,10 @@ public class KaiGe extends Spider {
 
             // --- 🚀 正常終點 ---
             String finalUrl = varPool.get("final_url");
+            if (finalUrl != null) {
+                finalUrl = finalUrl.replace("\\/", "/");
+            }
+
             boolean finalHasStream = finalUrl.toLowerCase().contains(".m3u8") || finalUrl.toLowerCase().contains(".mp4");
 
             // 🚀 判定邏輯：必須是最後一步成功(finalStepSuccess) 或者是 直接拿到了流媒體(finalHasStream)
