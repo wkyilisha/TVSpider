@@ -233,7 +233,7 @@ public class KaiGe extends Spider {
         try {
             logger("<br>🎬 <b>[播放解析啟動]</b>: " + originalUrl);
 
-// 🚀 2. 初始化變量池 (清空舊數據，放入起點地址作為第一棒)
+            // 🚀 2. 初始化變量池 (清空舊數據，放入起點地址)
             varPool.clear();
             varPool.put("play_id", originalUrl);
             varPool.put("final_url", originalUrl); 
@@ -241,6 +241,7 @@ public class KaiGe extends Spider {
             JSONObject play = rule.has("play") ? rule.getJSONObject("play") : new JSONObject();
             JSONArray steps = play.optJSONArray("steps");
             int stepCount = (steps != null ? steps.length() : 0);
+            boolean finalStepSuccess = false;
 
             // 🔥 核心保護：如果沒寫 Step，直接按原始邏輯走 (是流媒體就直連，不是就嗅探)
             if (stepCount == 0) {
@@ -255,95 +256,77 @@ public class KaiGe extends Spider {
                 return result;
             }
 
-            // 🚀 3. 核心 Step 循環：強制跑完所有步驟，實現「無差別接力」
+            // 🚀 3. 核心 Step 循環：吸取老代碼精髓，實現「自動接力」
             for (int i = 0; i < stepCount; i++) {
-                if (i >= 5) break; // 安全閥
+                if (i >= 5) break; // 安全閥：最多 5 步
 
                 JSONObject step = steps.getJSONObject(i);
                 String method = step.optString("method", "get").toLowerCase();
 
-                // 📢 【接力點】：請求網址優先從池子拿最新地址，如果 JSON 沒寫 url，就自動拿最後一次提取的結果
+                // 📢 【接力點】：下一步請求的網址，優先從池子裡拿「上一步切出來的最新地址」
+                // 如果 JSON 裡沒寫新 url，它就會拿 final_url 去請求
                 String lastResult = varPool.get("final_url");
                 String stepUrl = replaceStepVars(step.optString("url", lastResult));
+
                 Map<String, String> headers = getHeaders(step.optJSONObject("headers"));
 
                 logger("<b>Step " + (i + 1) + "</b> (" + method.toUpperCase() + "): " + stepUrl);
 
-                // 執行請求
                 OkResult res = method.equals("post") 
                     ? OkHttp.post(stepUrl, replaceStepVars(step.optString("body")), headers)
                     : OkHttp.get(stepUrl, null, headers);
 
-                String html = res.getBody();
+String html = res.getBody();
                 logCheck("解析 Step " + (i + 1), html, true);
 
-                // 🚀 凱哥「地毯式」提取器：絕不跳過，必出日誌
+                // 🚀 【關鍵修正】：必須先從當前 step 提取 vars 對象，否則下面會報錯
                 JSONObject vars = step.optJSONObject("vars");
+
+                        // --- 🚀 開始替換：變量提取循環 ---
                 if (vars != null) {
-                    Iterator<String> it = vars.keys();
-                    while (it.hasNext()) {
+                    boolean currentStepAnyOk = false; // 💡 標記本步是否拿到了新地址
+                    for (Iterator<String> it = vars.keys(); it.hasNext(); ) {
                         String k = it.next();
                         String vRule = vars.optString(k);
                         String val = "";
 
-                        // 📢 關鍵日誌：證明 Java 確實跑到了這一步
-                        logger("  🔎 [Java 提取中] 鍵: " + k + " | 規則: " + vRule);
-
-                        if (vRule.contains("&&")) {
-                            try {
-                                String[] rules = vRule.split("&&");
-                                String start = rules[0];
-                                String end = rules[1];
-                                
-                                // 💡 遍歷搜索：防止被第一個錯誤的標籤干擾
-                                int curPos = 0;
-                                while (curPos < html.length()) {
-                                    int sIdx = html.indexOf(start, curPos);
-                                    if (sIdx == -1) break; // 徹底找不到了
-                                    
-                                    sIdx += start.length();
-                                    int eIdx = html.indexOf(end, sIdx);
-                                    if (eIdx == -1) break; // 沒有結尾，跳出
-                                    
-                                    String tmp = html.substring(sIdx, eIdx).trim();
-                                    if (!tmp.isEmpty()) {
-                                        val = tmp; // 抓到了有意義的內容
-                                        break; 
-                                    }
-                                    curPos = sIdx; // 如果抓到的是空，往後繼續搜下一個標籤
-                                }
-                            } catch (Exception e) {
-                                logger("  └ 🚨 [截取崩潰]: " + e.getMessage());
+                        if (vRule.startsWith("json:")) {
+                            try { val = new JSONObject(html).optString(vRule.substring(5)); } catch (Exception e) { val = ""; }
+                        } else {
+                            KaiGeEngine.ExtractionResult engineRes = KaiGeEngine.doExtract(html, vRule, this.siteUrl);
+                            val = engineRes.value;
+                            if (android.text.TextUtils.isEmpty(val)) {
+                                logger("  └ ❌ [提取失敗] 規則: " + vRule);
+                            } else {
+                                logger("  └ 💡 [提取成功] [<b>" + k + "</b>] = " + val);
                             }
                         }
 
-                        // 如果原生截取失敗，再給引擎一個機會
-                        if (TextUtils.isEmpty(val)) {
-                            val = KaiGeEngine.doExtract(html, vRule, this.siteUrl).value;
-                        }
-
-                        // 🏁 強制輸出結果
-                        if (!TextUtils.isEmpty(val)) {
+                        if (!android.text.TextUtils.isEmpty(val)) {
                             varPool.put(k, val);
-                            varPool.put("final_url", val);
-                            logger("  └ ✅ [成功] -> " + val);
-                        } else {
-                            logger("  └ ❌ [失敗] -> 源碼中未找到符合內容");
-                            varPool.remove(k); // 提取失敗必須清除舊值
+                            if (k.contains("url") || k.matches("p[1-4]")) {
+                                varPool.put("final_url", val); 
+                                currentStepAnyOk = true; // ✅ 本步拿到了地址
+                                logger("  └ 🔄 <b>接力棒更新</b> -> 準備交給下一步請求");
+                            }
                         }
                     }
+                    // 🚀 【關鍵修正】：如果這是最後一個 Step 且拿到了數據
+                    if (i == stepCount - 1 && currentStepAnyOk) {
+                        finalStepSuccess = true;
+                    }
                 }
-
-
+                // --- 替換結束 ---
             } 
 
-            // --- 🚀 正常終點判定 ---
+            // --- 🚀 正常終點 ---
             String finalUrl = varPool.get("final_url");
-            
-            // 判定：只要最後的 finalUrl 變成了 http 地址，且不再是原始 ID，就推直連(0)
-            int pValue = (finalUrl.startsWith("http") && !finalUrl.equals(originalUrl)) ? 0 : 1;
-            
-            // 如果判定成功給 finalUrl，判定失敗(或沒提到地址)回退給原始 ID 讓殼子嗅探
+            boolean finalHasStream = finalUrl.toLowerCase().contains(".m3u8") || finalUrl.toLowerCase().contains(".mp4");
+
+            // 🚀 判定邏輯：必須是最後一步成功(finalStepSuccess) 或者是 直接拿到了流媒體(finalHasStream)
+            int pValue = (finalStepSuccess || finalHasStream) ? 0 : 1;
+
+            // 🚀 如果判定嗅探(pValue=1)，URL 必須還原成原始 ID，否則殼子會去嗅探 Step 1 拿到的中間無效地址
             String pushUrl = (pValue == 0) ? finalUrl : originalUrl;
 
             JSONObject resJson = new JSONObject();
