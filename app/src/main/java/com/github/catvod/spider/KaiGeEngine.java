@@ -93,30 +93,43 @@ public class KaiGeEngine {
         return executeSingleRule(content, step);
     }
 
-    private static String executeSingleRule(String html, String rule) {
-        if (rule.contains("@")) {
-            // ... 原有的属性提取逻辑保持不动 ...
-            String[] parts = rule.split("@");
-            String attrName = parts[parts.length - 1].trim(); 
-            Pattern p = Pattern.compile(attrName + "\\s*=\\s*[\"']([^\"']*)[\"']", Pattern.CASE_INSENSITIVE);
-            Matcher m = p.matcher(html);
-            if (m.find()) return m.group(1).trim();
-            return ""; 
-        }
+private static String executeSingleRule(String html, String rule) {
+        // ... 前面处理 @ 属性提取的逻辑保持不动 ...
 
         if (rule.contains("&&")) {
             String[] parts = rule.split("&&");
-            String start = parts[0].trim();
-            String end = parts.length > 1 ? parts[1].trim() : "";
-            
-            // 🚀 核心修改：让它能识别你的 * 号
-            // 只要 start 包含 *，就走通配符匹配，否则走原本的 simpleCut
-            if (start.contains("*")) {
-                return cutWithWildcard(html, start, end);
+            String currentContent = html;
+
+            // 🚀 核心修改：多级切刀逻辑
+            // 假设规则是 A && B && C
+            // 我们循环处理，前几段用来“缩小范围”，最后一段用来“截取结果”
+            for (int i = 0; i < parts.length - 1; i++) {
+                String start = parts[i].trim().replace("\\\"", "\"");
+                String nextPart = parts[i + 1].trim().replace("\\\"", "\"");
+
+                if (i < parts.length - 2) {
+                    // 还没到最后一段：只是为了把头切掉，缩小范围
+                    // 比如 var config && url
+                    // 先找到 var config，把前面的都扔了
+                    int s = currentContent.indexOf(start);
+                    if (s > -1) {
+                        currentContent = currentContent.substring(s + start.length());
+                    } else {
+                        return ""; // 任何一级定位不到就断开
+                    }
+} else {
+                    // 🚀 就在這裡修改：執行最後一段切割
+                    // 如果最後一段規則（例如 url*":"）包含 *，就走通配符，否則走普通切割
+                    if (start.contains("*")) {
+                        currentContent = cutWithWildcard(currentContent, start, nextPart);
+                    } else {
+                        currentContent = simpleCut(currentContent, start, nextPart);
+                    }
+                }
             }
-            return simpleCut(html, start, end);
+            return currentContent;
         }
-        return html; 
+        return html;
     }
 
 
@@ -174,14 +187,23 @@ public class KaiGeEngine {
 
 
 
-    private static String simpleCut(String html, String start, String end) {
+private static String simpleCut(String html, String start, String end) {
         try {
             int s = html.indexOf(start);
             if (s > -1) {
                 s += start.length();
                 if (isEmpty(end)) return html.substring(s).trim();
                 int e = html.indexOf(end, s);
-                if (e > -1) return html.substring(s, e).trim();
+                if (e > -1) {
+                    String res = html.substring(s, e).trim();
+                    // 🚀 针对纯 JSON 或 JS 变量的特殊清理
+                    // 去掉开头和结尾可能包裹的引号（单引号或双引号）
+                    if ((res.startsWith("\"") && res.endsWith("\"")) || (res.startsWith("'") && res.endsWith("'"))) {
+                        res = res.substring(1, res.length() - 1);
+                    }
+                    // 强制还原转义斜杠（JSON 里的 \/ 还原成 /）
+                    return res.replace("\\/", "/"); 
+                }
             }
         } catch (Exception e) { return ""; }
         return "";
