@@ -233,7 +233,7 @@ public class KaiGe extends Spider {
         try {
             logger("<br>🎬 <b>[播放解析啟動]</b>: " + originalUrl);
 
-            // 🚀 2. 初始化變量池 (清空舊數據，放入起點地址)
+// 🚀 2. 初始化變量池 (清空舊數據，放入起點地址作為第一棒)
             varPool.clear();
             varPool.put("play_id", originalUrl);
             varPool.put("final_url", originalUrl); 
@@ -241,7 +241,6 @@ public class KaiGe extends Spider {
             JSONObject play = rule.has("play") ? rule.getJSONObject("play") : new JSONObject();
             JSONArray steps = play.optJSONArray("steps");
             int stepCount = (steps != null ? steps.length() : 0);
-            boolean finalStepSuccess = false;
 
             // 🔥 核心保護：如果沒寫 Step，直接按原始邏輯走 (是流媒體就直連，不是就嗅探)
             if (stepCount == 0) {
@@ -256,35 +255,31 @@ public class KaiGe extends Spider {
                 return result;
             }
 
-            // 🚀 3. 核心 Step 循環：吸取老代碼精髓，實現「自動接力」
+            // 🚀 3. 核心 Step 循環：強制跑完所有步驟，實現「無差別接力」
             for (int i = 0; i < stepCount; i++) {
-                if (i >= 5) break; // 安全閥：最多 5 步
+                if (i >= 5) break; // 安全閥
 
                 JSONObject step = steps.getJSONObject(i);
                 String method = step.optString("method", "get").toLowerCase();
 
-                // 📢 【接力點】：下一步請求的網址，優先從池子裡拿「上一步切出來的最新地址」
-                // 如果 JSON 裡沒寫新 url，它就會拿 final_url 去請求
+                // 📢 【接力點】：請求網址優先從池子拿最新地址，如果 JSON 沒寫 url，就自動拿最後一次提取的結果
                 String lastResult = varPool.get("final_url");
                 String stepUrl = replaceStepVars(step.optString("url", lastResult));
-
                 Map<String, String> headers = getHeaders(step.optJSONObject("headers"));
 
                 logger("<b>Step " + (i + 1) + "</b> (" + method.toUpperCase() + "): " + stepUrl);
 
+                // 執行請求
                 OkResult res = method.equals("post") 
                     ? OkHttp.post(stepUrl, replaceStepVars(step.optString("body")), headers)
                     : OkHttp.get(stepUrl, null, headers);
 
-String html = res.getBody();
+                String html = res.getBody();
                 logCheck("解析 Step " + (i + 1), html, true);
 
-                // 🚀 【關鍵修正】：必須先從當前 step 提取 vars 對象，否則下面會報錯
+                // 🚀 【核心提取】：不管變量叫什麼，提取到就更新接力棒
                 JSONObject vars = step.optJSONObject("vars");
-
-                        // --- 🚀 開始替換：變量提取循環 ---
                 if (vars != null) {
-                    boolean currentStepAnyOk = false; // 💡 標記本步是否拿到了新地址
                     for (Iterator<String> it = vars.keys(); it.hasNext(); ) {
                         String k = it.next();
                         String vRule = vars.optString(k);
@@ -293,40 +288,33 @@ String html = res.getBody();
                         if (vRule.startsWith("json:")) {
                             try { val = new JSONObject(html).optString(vRule.substring(5)); } catch (Exception e) { val = ""; }
                         } else {
+                            // 調用凱哥引擎 2.0 進行切割
                             KaiGeEngine.ExtractionResult engineRes = KaiGeEngine.doExtract(html, vRule, this.siteUrl);
                             val = engineRes.value;
-                            if (android.text.TextUtils.isEmpty(val)) {
-                                logger("  └ ❌ [提取失敗] 規則: " + vRule);
-                            } else {
-                                logger("  └ 💡 [提取成功] [<b>" + k + "</b>] = " + val);
-                            }
                         }
 
                         if (!android.text.TextUtils.isEmpty(val)) {
+                            // 存入變量池供後續 Step 引用 (如 {p_url})
                             varPool.put(k, val);
-                            if (k.contains("url") || k.matches("p[1-4]")) {
-                                varPool.put("final_url", val); 
-                                currentStepAnyOk = true; // ✅ 本步拿到了地址
-                                logger("  └ 🔄 <b>接力棒更新</b> -> 準備交給下一步請求");
-                            }
+                            
+                            // 🚀 【接力棒更新】：只要這步提到了東西，它就是目前的「最終地址」
+                            varPool.put("final_url", val); 
+                            
+                            logger("  └ ✅ [提取成功] [<b>" + k + "</b>] = " + val);
+                        } else {
+                            logger("  └ ❌ [提取失敗] 鍵: " + k);
                         }
                     }
-                    // 🚀 【關鍵修正】：如果這是最後一個 Step 且拿到了數據
-                    if (i == stepCount - 1 && currentStepAnyOk) {
-                        finalStepSuccess = true;
-                    }
                 }
-                // --- 替換結束 ---
             } 
 
-            // --- 🚀 正常終點 ---
+            // --- 🚀 正常終點判定 ---
             String finalUrl = varPool.get("final_url");
-            boolean finalHasStream = finalUrl.toLowerCase().contains(".m3u8") || finalUrl.toLowerCase().contains(".mp4");
-
-            // 🚀 判定邏輯：必須是最後一步成功(finalStepSuccess) 或者是 直接拿到了流媒體(finalHasStream)
-            int pValue = (finalStepSuccess || finalHasStream) ? 0 : 1;
-
-            // 🚀 如果判定嗅探(pValue=1)，URL 必須還原成原始 ID，否則殼子會去嗅探 Step 1 拿到的中間無效地址
+            
+            // 判定：只要最後的 finalUrl 變成了 http 地址，且不再是原始 ID，就推直連(0)
+            int pValue = (finalUrl.startsWith("http") && !finalUrl.equals(originalUrl)) ? 0 : 1;
+            
+            // 如果判定成功給 finalUrl，判定失敗(或沒提到地址)回退給原始 ID 讓殼子嗅探
             String pushUrl = (pValue == 0) ? finalUrl : originalUrl;
 
             JSONObject resJson = new JSONObject();
