@@ -12,19 +12,38 @@ import java.util.regex.Pattern;
 
 public class KaiGeSmart {
 
-    // 🚀 1. 列表智慧化解析
+    // 🚀 1. 列表與搜索智慧化解析 (通用於分類與搜索)
     public static JSONObject parseList(Element el) {
         JSONObject vod = new JSONObject();
         try {
+            // 標題
             vod.put("vod_name", findTitle(el));
-            vod.put("vod_pic",  findPic(el));
-            vod.put("vod_id",   findUrl(el));
-            // 這裡的 remarks 抓取邏輯
-            String remarks = el.select(".remarks, .state, .pic-text, .tag, .text-right").text().trim();
+            
+            // 網址 (findUrl 內置了自動補全邏輯)
+            vod.put("vod_id", findUrl(el));
+            
+            // 圖片 (深度掃描： data-original -> data-src -> src -> background-image)
+            vod.put("vod_pic", findPic(el));
+
+            // 更新/備註 (全類名掃描)
+            String remarks = el.select(".remarks, .state, .pic-text, .tag, .text-right, .pic-tag, .label, .badge, .publicer, .fe-right").text().trim();
+            
+            // 降級方案：如果沒標籤，找最後一個含有數字或「完」字關鍵字的 span
+            if (TextUtils.isEmpty(remarks)) {
+                Elements spans = el.select("span");
+                for (int i = spans.size() - 1; i >= 0; i--) {
+                    String sText = spans.get(i).text().trim();
+                    if (sText.matches(".*[0-9完].*")) {
+                        remarks = sText;
+                        break;
+                    }
+                }
+            }
             vod.put("vod_remarks", remarks);
         } catch (Exception ignored) {}
         return vod;
     }
+
 
     // 🚀 2. 詳情智慧化解析
     public static JSONObject parseDetail(String html) {
@@ -138,21 +157,45 @@ public class KaiGeSmart {
         return node.text().replaceAll(key + "[:：]", "").trim();
     }
 
+    // 🚀 2. 強化版圖片提取器：應對懶加載與 CSS 背景圖
     public static String findPic(Element el) {
-        String[] attrs = {"data-original", "data-src", "src", "data-main"};
-        for (String a : attrs) {
-            String val = el.attr(a).trim();
-            if (!val.isEmpty() && !val.contains(".gif")) return val;
-        }
-        Element img = el.selectFirst("img");
-        if (img != null) {
+        String[] attrs = {"data-original", "data-src", "data-main", "src", "style"};
+        
+        // 優先找 img 標籤
+        Elements imgs = el.select("img");
+        for (Element img : imgs) {
             for (String a : attrs) {
                 String val = img.attr(a).trim();
+                // 處理背景圖 style="background-image:url(...)"
+                if (a.equals("style") && val.contains("url(")) {
+                    try {
+                        val = val.substring(val.indexOf("url(") + 4, val.lastIndexOf(")")).replace("'", "").replace("\"", "");
+                    } catch (Exception ignored) {}
+                }
+                // 排除佔位圖，只返回真實圖片
+                if (!val.isEmpty() && !val.contains(".gif") && (val.startsWith("http") || val.startsWith("/"))) {
+                    return val;
+                }
+            }
+        }
+
+        // 備選方案：找帶有背景圖或 lazyload 類名的容器 (div 或 a)
+        Element thumb = el.selectFirst("[style*='url'], .lazyload, .videopic, .cover");
+        if (thumb != null) {
+            String style = thumb.attr("style");
+            if (style != null && style.contains("url(")) {
+                try {
+                    return style.substring(style.indexOf("url(") + 4, style.lastIndexOf(")")).replace("'", "").replace("\"", "");
+                } catch (Exception ignored) {}
+            }
+            for (String a : attrs) {
+                String val = thumb.attr(a).trim();
                 if (!val.isEmpty() && !val.contains(".gif")) return val;
             }
         }
         return "";
     }
+
 
     public static String findTitle(Element el) {
         String t = el.attr("title").trim();
@@ -163,8 +206,20 @@ public class KaiGeSmart {
         return t;
     }
 
+    // 🚀 3. 強化版 URL 提取器：優先找影視詳情連結
     public static String findUrl(Element el) {
-        Element a = el.is("a") ? el : el.selectFirst("a");
-        return a != null ? a.attr("href") : "";
+        // 優先找包含影視特徵字樣的連結，排除掉廣告或無關 a 標籤
+        Element a = el.selectFirst("a[href*='vod'], a[href*='detail'], a[href*='show'], a[href*='play'], a[href*='.html']");
+        
+        // 如果上面沒找到，就隨便找容器內第一個 a
+        if (a == null) {
+            a = el.is("a") ? el : el.selectFirst("a");
+        }
+        
+        if (a != null) {
+            return a.attr("href");
+        }
+        return "";
     }
+
 }
