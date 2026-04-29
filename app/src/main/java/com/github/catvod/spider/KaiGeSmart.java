@@ -11,7 +11,7 @@ import java.util.*;
 
 public class KaiGeSmart {
 
-    public static String buildResult(String data) {
+public static String buildResult(String data, String key) {
         try {
             if (TextUtils.isEmpty(data)) return "{\"list\":[]}";
             String trimData = data.trim();
@@ -32,6 +32,10 @@ public class KaiGeSmart {
             for (Element el : items) {
                 JSONObject vod = parseList(el);
                 if (vod.has("vod_id") && !TextUtils.isEmpty(vod.optString("vod_name"))) {
+                    
+                    // 💡 凱哥注意：這裡直接從 vod 裡取名字來比對
+                    if (!TextUtils.isEmpty(key) && !vod.optString("vod_name").contains(key)) continue; 
+                    
                     list.put(vod);
                 }
             }
