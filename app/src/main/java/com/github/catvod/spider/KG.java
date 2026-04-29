@@ -82,53 +82,19 @@ public class KG extends Spider {
     }
 
 
-@Override
-public String categoryContent(String tid, String pg, boolean f, HashMap<String, String> e) {
-    try {
-        // 1. 根據頁碼選擇 URL 模板 (優先處理第一頁特殊網址)
-        String urlTemplate = (pg.equals("1") && rule.has("cate_page_1")) 
-                ? rule.optString("cate_page_1") 
-                : rule.optString("cate_url");
-
-        if (TextUtils.isEmpty(urlTemplate)) {
-            return "{\"list\":[]}";
-        }
-
-        // 2. 🚀 參數替換：先替換基礎的分類 ID 和 頁碼
-        String url = urlTemplate.replace("{tid}", tid).replace("{pg}", pg);
-
-        // 3. 🚀 篩選對接：循環 extend 映射表，動態替換如 {area}, {year}, {by} 等占位符
-        if (e != null && !e.isEmpty()) {
-            for (String key : e.keySet()) {
-                String value = e.get(key);
-                if (value != null) {
-                    url = url.replace("{" + key + "}", value);
-                }
-            }
-        }
-
-        // 4. 🚀 智慧清理：使用正則表達式把模板中剩餘未被選擇的 {xxx} 標籤清空，防止 URL 非法
-        url = url.replaceAll("\\{[^\\}]+\\}", "");
-
-        // 5. 自動補全域名路徑
-        if (url.startsWith("/") && !url.startsWith("//")) {
-            url = this.siteUrl + url;
-        }
-
-        // 6. 執行網絡請求 (保留凱哥原有的 KaiGeNet 工具類)
-        OkResult res = KaiGeNet.smartRequest(this.siteUrl, "get", url, null, getHeaders(null));
-        
-        // 輸出日誌以便調試
-        logCheck("分類請求", "URL: " + url, false);
-
-        // 7. 🚀 智慧解析：調用 KaiGeSmart 將 HTML 自動轉化為標準 JSON 列表
-        return KaiGeSmart.buildResult(res.getBody());
-
-    } catch (Exception ex) {
-        logger("🚨 [分類異常]: " + ex.getMessage());
-        return "{\"list\":[]}";
+    @Override
+    public String categoryContent(String tid, String pg, boolean f, HashMap<String, String> e) {
+        try {
+            String url = (pg.equals("1") && rule.has("cate_page_1") ? rule.optString("cate_page_1") : rule.optString("cate_url"))
+                    .replace("{tid}", tid).replace("{pg}", pg);
+            if (url.startsWith("/") && !url.startsWith("//")) url = this.siteUrl + url;
+            
+            // 🚀 升級：使用 KaiGeNet
+            OkResult res = KaiGeNet.smartRequest(this.siteUrl, "get", url, null, getHeaders(null));
+            logCheck("分類", res.getBody(), false);
+            return parseList(res.getBody(), pg, false);
+        } catch (Exception ex) { return "{\"list\":[]}"; }
     }
-}
 
     @Override
     public String searchContent(String key, boolean quick) {
@@ -341,34 +307,52 @@ public String categoryContent(String tid, String pg, boolean f, HashMap<String, 
         return headJson;
     }
 
-    private String parseList(String html, String pg, boolean isSearch) {
-        try {
-            Document doc = Jsoup.parse(html);
-            JSONArray list = new JSONArray();
-            String prefix = isSearch ? "sc_" : "cate_";
-            Elements items = doc.select(rule.optString(prefix + "item", rule.optString("cate_item")));
-            for (Element item : items) {
-                // 🚀 升級：調用 KaiGeSmart 智慧識別列表項
-                JSONObject smartVod = KaiGeSmart.parseList(item);
-                
-                JSONObject vod = new JSONObject();
-                String vId = extract(item, rule.optString(prefix + "id", rule.optString("cate_id")));
-                // ID 保底處理
-                if (TextUtils.isEmpty(vId)) vId = smartVod.optString("vod_id");
+private String parseList(String html, String pg, boolean isSearch) {
+    try {
+        Document doc = Jsoup.parse(html);
+        JSONArray list = new JSONArray();
+        String prefix = isSearch ? "sc_" : "cate_";
+        
+        // 取出你在 JSON 寫的容器定位
+        String itemRule = rule.optString(prefix + "item", rule.optString("cate_item"));
+        Elements items = doc.select(itemRule);
+        
+        for (Element item : items) {
+            // 🚀 調用凱哥智慧識別
+            JSONObject smartVod = KaiGeSmart.parseList(item);
+            
+            JSONObject vod = new JSONObject();
+            
+            // 1. ID 處理：規則優先，保底用智慧識別
+            String vId = extract(item, rule.optString(prefix + "id", rule.optString("cate_id")));
+            if (TextUtils.isEmpty(vId)) vId = smartVod.optString("vod_id");
+            
+            // 💡 修正：如果 ID 已經是 http 了就不拼 siteUrl
+            if (!TextUtils.isEmpty(vId)) {
                 vod.put("vod_id", vId.startsWith("http") ? vId : this.siteUrl + (vId.startsWith("/") ? "" : "/") + vId);
-                
-                String vName = extract(item, rule.optString(prefix + "name", rule.optString("cate_name")));
-                vod.put("vod_name", TextUtils.isEmpty(vName) ? smartVod.optString("vod_name") : vName);
-                
-                String vPic = extract(item, rule.optString(prefix + "pic", rule.optString("cate_pic")));
-                vod.put("vod_pic", TextUtils.isEmpty(vPic) ? smartVod.optString("vod_pic") : vPic);
-                
-                vod.put("vod_remarks", extract(item, rule.optString(prefix + "remarks", rule.optString("cate_remarks"))));
-                list.put(vod);
             }
-            return new JSONObject().put("list", list).put("page", pg).toString();
-        } catch (Exception e) { return "{\"list\":[]}"; }
-    }
+
+            // 2. 標題：智慧識別已經很準了，直接保底
+            String vName = extract(item, rule.optString(prefix + "name", rule.optString("cate_name")));
+            vod.put("vod_name", TextUtils.isEmpty(vName) ? smartVod.optString("vod_name") : vName);
+            
+            // 3. 圖片：這裡會直接用到 KaiGeSmart 裡你要求的高清優先邏輯
+            String vPic = extract(item, rule.optString(prefix + "pic", rule.optString("cate_pic")));
+            if (TextUtils.isEmpty(vPic)) vPic = smartVod.optString("vod_pic");
+            
+            // 💡 修正：圖片連結補全
+            if (!TextUtils.isEmpty(vPic) && vPic.startsWith("//")) vPic = "http:" + vPic;
+            vod.put("vod_pic", vPic);
+            
+            // 4. 備註
+            String vRemarks = extract(item, rule.optString(prefix + "remarks", rule.optString("cate_remarks")));
+            vod.put("vod_remarks", TextUtils.isEmpty(vRemarks) ? smartVod.optString("vod_remarks") : vRemarks);
+
+            if (vod.has("vod_id")) list.put(vod);
+        }
+        return new JSONObject().put("list", list).put("page", pg).toString();
+    } catch (Exception e) { return "{\"list\":[]}"; }
+}
 
     private String extract(Object root, String ruleStr) {
         try {
@@ -417,67 +401,41 @@ public String categoryContent(String tid, String pg, boolean f, HashMap<String, 
 @Override
 public String homeContent(boolean filter) {
     try {
-        logger("🏠 [主頁] 正在加載動態分類與智慧篩選...");
-
-        // 1. 獲取 JSON 規則裡的分類
+        logger("🏠 [主頁] 正在加載分類導航...");
         JSONArray classes = rule.optJSONArray("classes");
+        
         if (classes == null || classes.length() == 0) {
-            logger("🚨 [主頁] 錯誤：JSON 規則中未定義 classes");
+            logger("🚨 [主頁] 警告：JSON 規則中未定義 classes 或格式錯誤");
             return "";
         }
 
-        JSONObject result = new JSONObject();
+        // 🚀 凱哥特製：字段自動對接
+        // 很多 JSON 寫的是 type_name/type_id，有些殼子要的是 name/id
+        // 我們在這裡做一個轉換，保證 100% 顯示
         JSONArray resultClasses = new JSONArray();
-        JSONObject filterList = new JSONObject();
-
-        // 2. 遍歷並嗅探
         for (int i = 0; i < classes.length(); i++) {
-            JSONObject clsObj = classes.getJSONObject(i);
-            String name = clsObj.optString("type_name", clsObj.optString("name"));
-            String id = clsObj.optString("type_id", clsObj.optString("id"));
-            String typeUrl = clsObj.optString("type_url", clsObj.optString("url"));
-
+            JSONObject oldCate = classes.getJSONObject(i);
             JSONObject newCate = new JSONObject();
+            
+            String name = oldCate.optString("type_name", oldCate.optString("name"));
+            String id = oldCate.optString("type_id", oldCate.optString("id"));
+            
             newCate.put("type_name", name);
             newCate.put("type_id", id);
             resultClasses.put(newCate);
-
-            // 🚀 智慧嗅探邏輯
-            if (filter && !TextUtils.isEmpty(typeUrl)) {
-                try {
-                    logger("🔍 [智慧嗅探] 正在分析分類: " + name + " -> " + typeUrl);
-
-                    // 💡 修正處：使用 KaiGeNet，且 getHeaders 傳入空的 JSONObject
-                    OkResult res = KaiGeNet.smartRequest(this.siteUrl, "get", typeUrl, null, getHeaders(new JSONObject()));
-                    String html = res.getBody();
-
-                    // 調用 Filter 類抓取篩選
-                    JSONObject smartFilters = KaiGeFilter.getSmartFilters(html);
-
-                    if (smartFilters != null && smartFilters.length() > 0) {
-                        filterList.put(id, smartFilters);
-                        logger("✅ [智慧嗅探] 分類 " + name + " 篩選加載成功");
-                    }
-                } catch (Exception e) {
-                    logger("⚠️ [智慧嗅探] 分類 " + name + " 抓取失敗: " + e.getMessage());
-                }
-            }
         }
 
+        logger("✅ [主頁] 分類加載成功，共 " + resultClasses.length() + " 個頻道");
+        
+        JSONObject result = new JSONObject();
         result.put("class", resultClasses);
-
-        // 3. 封裝結果
-        if (filterList.length() > 0) {
-            result.put("filters", filterList);
-            logger("🚀 [主頁] 動態智慧篩選已生效");
-        } else if (rule.has("filters")) {
+        
+        // 如果規則裡有篩選數據(filters)，也可以在這裡放進去
+        if (rule.has("filters")) {
             result.put("filters", rule.optJSONObject("filters"));
-            logger("ℹ️ [主頁] 使用 JSON 內預設篩選");
         }
-
-        logger("✅ [主頁] 分類加載完成，共 " + resultClasses.length() + " 個頻道");
+        
         return result.toString();
-
     } catch (Exception e) {
         logger("🚨 [主頁異常]: " + e.getMessage());
         return "";
