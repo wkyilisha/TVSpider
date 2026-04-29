@@ -419,7 +419,7 @@ public String homeContent(boolean filter) {
     try {
         logger("🏠 [主頁] 正在加載動態分類與智慧篩選...");
 
-        // 1. 從 JSON 規則中獲取基礎分類
+        // 1. 獲取 JSON 規則裡的分類
         JSONArray classes = rule.optJSONArray("classes");
         if (classes == null || classes.length() == 0) {
             logger("🚨 [主頁] 錯誤：JSON 規則中未定義 classes");
@@ -430,32 +430,28 @@ public String homeContent(boolean filter) {
         JSONArray resultClasses = new JSONArray();
         JSONObject filterList = new JSONObject();
 
-        // 2. 遍歷分類，進行數據轉換與智慧嗅探
+        // 2. 遍歷並嗅探
         for (int i = 0; i < classes.length(); i++) {
             JSONObject clsObj = classes.getJSONObject(i);
-
-            // 兼容不同格式的 ID 和 Name
             String name = clsObj.optString("type_name", clsObj.optString("name"));
             String id = clsObj.optString("type_id", clsObj.optString("id"));
-
-            // 獲取分類的原始 URL (對應 JSON 裡的 type_url 或 url 字段)
             String typeUrl = clsObj.optString("type_url", clsObj.optString("url"));
 
-            // 構建返回給殼子的標準分類對象
             JSONObject newCate = new JSONObject();
             newCate.put("type_name", name);
             newCate.put("type_id", id);
             resultClasses.put(newCate);
 
-            // 🚀 3. 智慧嗅探：如果開啟 filter 且 URL 不為空，則動態抓取該頁面的篩選項
+            // 🚀 智慧嗅探邏輯
             if (filter && !TextUtils.isEmpty(typeUrl)) {
                 try {
                     logger("🔍 [智慧嗅探] 正在分析分類: " + name + " -> " + typeUrl);
 
-                    // 請求該分類的第一頁 HTML
-                    String html = OkHttpUtil.string(typeUrl, getHeaders());
+                    // 💡 修正處：使用 KaiGeNet，且 getHeaders 傳入空的 JSONObject
+                    OkResult res = KaiGeNet.smartRequest(this.siteUrl, "get", typeUrl, null, getHeaders(new JSONObject()));
+                    String html = res.getBody();
 
-                    // 調用 KaiGeFilter 進行嗅探
+                    // 調用 Filter 類抓取篩選
                     JSONObject smartFilters = KaiGeFilter.getSmartFilters(html);
 
                     if (smartFilters != null && smartFilters.length() > 0) {
@@ -468,16 +464,15 @@ public String homeContent(boolean filter) {
             }
         }
 
-        // 封裝最終結果
         result.put("class", resultClasses);
 
-        // 4. 優先級判斷：動態優先，JSON 規則備選
+        // 3. 封裝結果
         if (filterList.length() > 0) {
             result.put("filters", filterList);
             logger("🚀 [主頁] 動態智慧篩選已生效");
         } else if (rule.has("filters")) {
             result.put("filters", rule.optJSONObject("filters"));
-            logger("ℹ️ [主頁] 未嗅探到新數據，使用 JSON 內預設篩選");
+            logger("ℹ️ [主頁] 使用 JSON 內預設篩選");
         }
 
         logger("✅ [主頁] 分類加載完成，共 " + resultClasses.length() + " 個頻道");
@@ -488,5 +483,4 @@ public String homeContent(boolean filter) {
         return "";
     }
 }
-
 }
