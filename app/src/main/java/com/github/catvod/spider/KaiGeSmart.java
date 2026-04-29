@@ -120,6 +120,9 @@ public class KaiGeSmart {
                 else if (text.contains("导演") || text.contains("導演")) vod.put("vod_director", getTagsOrText(node, "导演"));
                 else if (text.contains("地区") || text.contains("地區")) vod.put("vod_area", getTagsOrText(node, "地区"));
                 else if (text.contains("年份") || text.contains("年代")) vod.put("vod_year", getTagsOrText(node, "年份"));
+                else if (text.matches(".*(更新|狀態|状态).*")) {
+                    vod.put("vod_remarks", text.replaceAll(".*[:：]", "").trim());
+                }
             }
             processPlaylist(doc, vod);
         } catch (Exception ignored) {}
