@@ -13,8 +13,8 @@ public class KaiGeSmart {
 
     /**
      * 🚀 列表打包器
-     * 邏輯：如果你在 JSON 裡定位了容器，這裡接收到的就是容器片段；
-     * 如果沒定位，這裡接收的是全頁源碼，則啟動自動保底識別。
+     * 邏輯：JSON 規則優先。如果傳入的是已經 select 過的片段則直接解析；
+     * 如果是整頁源碼，則啟動自動保底識別。
      */
     public static String buildResult(String data) {
         try {
@@ -26,12 +26,10 @@ public class KaiGeSmart {
             JSONArray list = new JSONArray();
             Document doc = Jsoup.parse(trimData);
             
-            // 1. 獲取初始節點
+            // 獲取節點：如果是 JSON 規則 select 出來的，body 只有子節點
             Elements items = doc.body().children();
 
-            // 2. 💡 智能保底判斷：
-            // 如果子節點太少（說明傳入的是整頁源碼而非預選容器），或者子節點裡沒連結
-            // 則啟動「自動定位」模式，尋找常見的視頻容器類名或 a:has(img)
+            // 💡 智能保底：如果子節點太少（說明是全頁源碼），啟動自動識別模式
             if (items.size() < 3) { 
                 items = doc.select(".myui-vodlist__item, .vodlist_item, .fed-list-item, .pack-ykpack, .list-item, .v-item, .module-item, .stui-vodlist__item, li:has(img), a:has(img)");
             }
@@ -50,7 +48,7 @@ public class KaiGeSmart {
     }
 
     /**
-     * 🚀 列表項屬性提取
+     * 🚀 列表項解析
      */
     public static JSONObject parseList(Element el) {
         JSONObject vod = new JSONObject();
@@ -67,13 +65,13 @@ public class KaiGeSmart {
     }
 
     /**
-     * 🚀 詳情頁解析
+     * 🚀 詳情頁解析 (方法名已改回 parseDetail 以匹配你的 KG.java)
      */
-    public static String buildDetail(String data) {
+    public static JSONObject parseDetail(String html) {
+        JSONObject vod = new JSONObject();
         try {
-            if (TextUtils.isEmpty(data)) return "{\"list\":[]}";
-            Document doc = Jsoup.parse(data);
-            JSONObject vod = new JSONObject();
+            if (TextUtils.isEmpty(html)) return vod;
+            Document doc = Jsoup.parse(html);
             
             Element titleNode = doc.selectFirst("h1, h2, .title, .name, .module-info-heading h1");
             vod.put("vod_name", titleNode != null ? titleNode.text().trim() : "未知影片");
@@ -98,7 +96,16 @@ public class KaiGeSmart {
             }
             
             processPlaylist(doc, vod);
-            
+        } catch (Exception ignored) {}
+        return vod;
+    }
+
+    /**
+     * 🚀 為了兼容之前的調用，保留 buildDetail 並調用 parseDetail
+     */
+    public static String buildDetail(String data) {
+        try {
+            JSONObject vod = parseDetail(data);
             JSONArray list = new JSONArray();
             list.put(vod);
             JSONObject result = new JSONObject();
@@ -116,8 +123,8 @@ public class KaiGeSmart {
         try {
             List<String> from = new ArrayList<>();
             List<String> urls = new ArrayList<>();
-            Elements tabs = doc.select(".tabs li, .line-title, .from-list li, .playlist-tab li, .module-tab-item");
-            Elements blocks = doc.select(".playlist, .content_playlist, .play-list-box, #playlist, .module-play-list");
+            Elements tabs = doc.select(".tabs li, .line-title, .from-list li, .playlist-tab li, .module-tab-item, .stui-pannel__head li");
+            Elements blocks = doc.select(".playlist, .content_playlist, .play-list-box, #playlist, .module-play-list, .stui-content__playlist");
 
             if (blocks.isEmpty()) {
                 String links = findAllLinks(doc);
