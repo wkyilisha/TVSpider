@@ -171,29 +171,60 @@ public class KaiGeSmart {
     }
 
     /**
-     * 🚀 圖片提取：data-original 優先級最高
+     * 🚀 凱哥特調：精準圖片抓取邏輯
+     * 優先級：<a>標籤下的 lazyload -> <img>標籤屬性 -> 背景圖
      */
     public static String findPic(Element el) {
+        if (el == null) return "";
+
+        // 1. 優先找帶有 lazyload 類名的標籤（尤其是 a, div, span）
+        Elements lazies = el.select(".lazyload, .lazy, .videopic, .img-responsive");
+        for (Element lazy : lazies) {
+            String val = getImgFromAttributes(lazy);
+            if (!val.isEmpty()) return fixUrl(val);
+        }
+
+        // 2. 其次找 img 標籤（哪怕它沒有 lazyload 類名）
         Elements imgs = el.select("img");
         for (Element img : imgs) {
-            // 💡 調整後的優先級列表：高清原圖優先
-            String[] attrs = {"data-original", "data-src", "src", "data-main", "data-lazy-src", "data-srcset", "_src"};
-            for (String a : attrs) {
-                String val = img.attr(a).trim();
-                if (!val.isEmpty() && !val.contains(".gif") && (val.startsWith("http") || val.startsWith("/") || val.startsWith("//"))) {
-                    return fixUrl(val);
-                }
+            String val = getImgFromAttributes(img);
+            if (!val.isEmpty()) return fixUrl(val);
+        }
+
+        // 3. 背景圖兜底
+        Elements all = el.allElements();
+        for (Element item : all) {
+            String style = item.attr("style");
+            if (style.contains("url(")) {
+                try {
+                    String val = style.substring(style.indexOf("url(") + 4, style.lastIndexOf(")")).replace("'", "").replace("\"", "").trim();
+                    if (isValidPic(val)) return fixUrl(val);
+                } catch (Exception ignored) {}
             }
         }
-        // 背景圖兜底
-        String style = el.attr("style");
-        if (style.contains("url(")) {
-            try {
-                String val = style.substring(style.indexOf("url(") + 4, style.lastIndexOf(")")).replace("'", "").replace("\"", "");
-                if (!val.isEmpty() && !val.contains(".gif")) return fixUrl(val);
-            } catch (Exception ignored) {}
+        return "";
+    }
+
+    /**
+     * 💡 私有工具：從屬性中提取圖片地址
+     */
+    private static String getImgFromAttributes(Element item) {
+        String[] attrs = {"data-original", "data-src", "src", "data-main", "data-lazy-src", "data-srcset", "_src"};
+        for (String a : attrs) {
+            String val = item.attr(a).trim();
+            if (isValidPic(val)) return val;
         }
         return "";
+    }
+
+    /**
+     * 💡 私有工具：驗證地址是否為真實圖片
+     */
+    private static boolean isValidPic(String url) {
+        if (TextUtils.isEmpty(url)) return false;
+        String u = url.toLowerCase();
+        if (u.contains(".gif") || u.contains("base64,")) return false;
+        return u.startsWith("http") || u.startsWith("/") || u.startsWith("//");
     }
 
     private static String fixUrl(String url) {
