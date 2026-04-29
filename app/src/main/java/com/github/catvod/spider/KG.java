@@ -82,19 +82,53 @@ public class KG extends Spider {
     }
 
 
-    @Override
-    public String categoryContent(String tid, String pg, boolean f, HashMap<String, String> e) {
-        try {
-            String url = (pg.equals("1") && rule.has("cate_page_1") ? rule.optString("cate_page_1") : rule.optString("cate_url"))
-                    .replace("{tid}", tid).replace("{pg}", pg);
-            if (url.startsWith("/") && !url.startsWith("//")) url = this.siteUrl + url;
-            
-            // 🚀 升級：使用 KaiGeNet
-            OkResult res = KaiGeNet.smartRequest(this.siteUrl, "get", url, null, getHeaders(null));
-            logCheck("分類", res.getBody(), false);
-            return parseList(res.getBody(), pg, false);
-        } catch (Exception ex) { return "{\"list\":[]}"; }
+@Override
+public String categoryContent(String tid, String pg, boolean f, HashMap<String, String> e) {
+    try {
+        // 1. 根據頁碼選擇 URL 模板 (優先處理第一頁特殊網址)
+        String urlTemplate = (pg.equals("1") && rule.has("cate_page_1")) 
+                ? rule.optString("cate_page_1") 
+                : rule.optString("cate_url");
+
+        if (TextUtils.isEmpty(urlTemplate)) {
+            return "{\"list\":[]}";
+        }
+
+        // 2. 🚀 參數替換：先替換基礎的分類 ID 和 頁碼
+        String url = urlTemplate.replace("{tid}", tid).replace("{pg}", pg);
+
+        // 3. 🚀 篩選對接：循環 extend 映射表，動態替換如 {area}, {year}, {by} 等占位符
+        if (e != null && !e.isEmpty()) {
+            for (String key : e.keySet()) {
+                String value = e.get(key);
+                if (value != null) {
+                    url = url.replace("{" + key + "}", value);
+                }
+            }
+        }
+
+        // 4. 🚀 智慧清理：使用正則表達式把模板中剩餘未被選擇的 {xxx} 標籤清空，防止 URL 非法
+        url = url.replaceAll("\\{[^\\}]+\\}", "");
+
+        // 5. 自動補全域名路徑
+        if (url.startsWith("/") && !url.startsWith("//")) {
+            url = this.siteUrl + url;
+        }
+
+        // 6. 執行網絡請求 (保留凱哥原有的 KaiGeNet 工具類)
+        OkResult res = KaiGeNet.smartRequest(this.siteUrl, "get", url, null, getHeaders(null));
+        
+        // 輸出日誌以便調試
+        logCheck("分類請求", "URL: " + url, false);
+
+        // 7. 🚀 智慧解析：調用 KaiGeSmart 將 HTML 自動轉化為標準 JSON 列表
+        return KaiGeSmart.buildResult(res.getBody());
+
+    } catch (Exception ex) {
+        logger("🚨 [分類異常]: " + ex.getMessage());
+        return "{\"list\":[]}";
     }
+}
 
     @Override
     public String searchContent(String key, boolean quick) {
