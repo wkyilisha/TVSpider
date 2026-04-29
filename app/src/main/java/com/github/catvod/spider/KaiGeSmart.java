@@ -171,7 +171,7 @@ public class KaiGeSmart {
     }
 
     /**
-     * 🚀 凱哥特調：精準圖片抓取邏輯
+     * 🚀 凱哥特調：精準圖片抓取邏輯 (相容舊版 Jsoup)
      * 優先級：<a>標籤下的 lazyload -> <img>標籤屬性 -> 背景圖
      */
     public static String findPic(Element el) {
@@ -191,8 +191,8 @@ public class KaiGeSmart {
             if (!val.isEmpty()) return fixUrl(val);
         }
 
-        // 3. 背景圖兜底
-        Elements all = el.allElements();
+        // 3. 背景圖兜底 (將 allElements() 替換為 select("*") 以兼容舊版本)
+        Elements all = el.select("*"); 
         for (Element item : all) {
             String style = item.attr("style");
             if (style.contains("url(")) {
@@ -209,6 +209,7 @@ public class KaiGeSmart {
      * 💡 私有工具：從屬性中提取圖片地址
      */
     private static String getImgFromAttributes(Element item) {
+        // 凱哥，這裡的屬性順序就是抓取的優先級順序
         String[] attrs = {"data-original", "data-src", "src", "data-main", "data-lazy-src", "data-srcset", "_src"};
         for (String a : attrs) {
             String val = item.attr(a).trim();
@@ -223,7 +224,9 @@ public class KaiGeSmart {
     private static boolean isValidPic(String url) {
         if (TextUtils.isEmpty(url)) return false;
         String u = url.toLowerCase();
+        // 排除掉 loading 動圖和 base64
         if (u.contains(".gif") || u.contains("base64,")) return false;
+        // 只要是 http 開頭或是相對路徑地址就認為是潛在圖片
         return u.startsWith("http") || u.startsWith("/") || u.startsWith("//");
     }
 
