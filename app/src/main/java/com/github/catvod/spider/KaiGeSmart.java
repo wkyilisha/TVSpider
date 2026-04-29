@@ -7,8 +7,6 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import android.text.TextUtils;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class KaiGeSmart {
 
@@ -40,60 +38,57 @@ public class KaiGeSmart {
                 }
             }
             vod.put("vod_remarks", remarks);
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+            // 確保單個列表項解析失敗不影響整體
+        }
         return vod;
     }
 
-
-    // 🚀 2. 詳情智慧化解析
+    // 🚀 2. 詳情智慧化解析 (修復了 JSONObject 編譯錯誤)
     public static JSONObject parseDetail(String html) {
         Document doc = Jsoup.parse(html);
         JSONObject vod = new JSONObject();
+        try {
+            // 1. 標題
+            Element titleNode = doc.selectFirst("h1, .title, .myui-content__detail h1");
+            vod.put("vod_name", titleNode != null ? titleNode.text().trim() : "未知標題");
 
-        // 標題
-        Element titleNode = doc.selectFirst("h1, .title, .myui-content__detail h1");
-        vod.put("vod_name", titleNode != null ? titleNode.text().trim() : "未知標題");
+            // 2. 圖片
+            vod.put("vod_pic", findPic(doc));
 
-        // 圖片
-        Element imgNode = doc.selectFirst(".myui-content__thumb img, .picture img, img.lazyload, .vod-pic img");
-        String pic = "";
-        if (imgNode != null) {
-            if (imgNode.hasAttr("data-original")) pic = imgNode.attr("data-original");
-            else if (imgNode.hasAttr("data-src")) pic = imgNode.attr("data-src");
-            else pic = imgNode.attr("src");
-        }
-        vod.put("vod_pic", pic);
-
-        // 簡介 (長度優先)
-        Elements contents = doc.select(".content, .sketch, .data, #desc, .vod_content");
-        String bestContent = "";
-        for (Element c : contents) {
-            String t = c.text().trim();
-            if (t.length() > bestContent.length()) bestContent = t;
-        }
-        vod.put("vod_content", bestContent);
-
-        // 數據欄位 (主演、導演、地區、年份、更新)
-        Elements dataNodes = doc.select(".data, p, li, .myui-content__detail p, .myui-content__detail li");
-        for (Element node : dataNodes) {
-            String text = node.text();
-            if (text.contains("主演")) {
-                vod.put("vod_actor", getTagsOrText(node, "主演"));
-            } else if (text.contains("导演") || text.contains("導演")) {
-                vod.put("vod_director", getTagsOrText(node, "导演"));
-            } else if (text.contains("地区") || text.contains("地區")) {
-                vod.put("vod_area", getTagsOrText(node, "地区"));
-            } else if (text.contains("年份") || text.contains("年代") || text.contains("上映")) {
-                vod.put("vod_year", getTagsOrText(node, "年份"));
-            } else if (text.contains("更新") || text.contains("狀態") || text.contains("状态")) {
-                String rem = text.replaceAll("更新[:：]", "").replaceAll("狀態[:：]", "").trim();
-                vod.put("vod_remarks", rem);
+            // 3. 內容 (長度優先：自動篩選最完整的簡介)
+            Elements contents = doc.select(".content, .sketch, .data, #desc, .vod_content");
+            String bestContent = "";
+            for (Element c : contents) {
+                String t = c.text().trim();
+                if (t.length() > bestContent.length()) bestContent = t;
             }
+            vod.put("vod_content", bestContent);
+
+            // 4. 數據欄位掃描 (關鍵字智慧匹配)
+            Elements dataNodes = doc.select(".data, p, li, .myui-content__detail p, .myui-content__detail li");
+            for (Element node : dataNodes) {
+                String text = node.text();
+                if (text.contains("主演")) {
+                    vod.put("vod_actor", getTagsOrText(node, "主演"));
+                } else if (text.contains("导演") || text.contains("導演")) {
+                    vod.put("vod_director", getTagsOrText(node, "导演"));
+                } else if (text.contains("地区") || text.contains("地區")) {
+                    vod.put("vod_area", getTagsOrText(node, "地区"));
+                } else if (text.contains("年份") || text.contains("年代") || text.contains("上映")) {
+                    vod.put("vod_year", getTagsOrText(node, "年份"));
+                } else if (text.contains("更新") || text.contains("狀態") || text.contains("状态")) {
+                    String rem = text.replaceAll("更新[:：]", "").replaceAll("狀態[:：]", "").replaceAll("状态[:：]", "").trim();
+                    vod.put("vod_remarks", rem);
+                }
+            }
+
+            // 5. 解析播放列表
+            processPlaylist(doc, vod);
+
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-
-        // 解析播放列表
-        processPlaylist(doc, vod);
-
         return vod;
     }
 
@@ -102,8 +97,8 @@ public class KaiGeSmart {
         try {
             List<String> fromList = new ArrayList<>();
             List<String> urlList = new ArrayList<>();
-            Elements tabs = doc.select(".tabs li, .line-title, .from-list li, [data-line], .playlist-tab li");
-            Elements blocks = doc.select(".playlist, .content_playlist, .play-list-box, #playlist, .myui-content__list");
+            Elements tabs = doc.select(".tabs li, .line-title, .from-list li, [data-line], .playlist-tab li, .myui-panel__head li");
+            Elements blocks = doc.select(".playlist, .content_playlist, .play-list-box, #playlist, .myui-content__list, .myui-panel_bd .tab-content");
 
             if (blocks.isEmpty()) {
                 String links = findAllLinks(doc);
@@ -131,10 +126,12 @@ public class KaiGeSmart {
     // 🚀 4. 輔助工具方法
     private static String findAllLinks(Element root) {
         StringBuilder sb = new StringBuilder();
+        // 抓取區塊內所有 a 標籤
         for (Element a : root.select("a")) {
             String n = a.text().trim();
             String h = a.attr("href");
-            if (h.contains("/") && n.length() < 20 && !n.contains("下載")) {
+            // 過濾無效連結與明顯不是集數的長文本
+            if (!h.isEmpty() && n.length() < 25 && !n.contains("下載") && !n.contains("詳情")) {
                 if (sb.length() > 0) sb.append("#");
                 sb.append(n).append("$").append(h);
             }
@@ -157,11 +154,11 @@ public class KaiGeSmart {
         return node.text().replaceAll(key + "[:：]", "").trim();
     }
 
-    // 🚀 2. 強化版圖片提取器：應對懶加載與 CSS 背景圖
+    // 🚀 5. 強化版圖片提取器：應對懶加載與 CSS 背景圖
     public static String findPic(Element el) {
         String[] attrs = {"data-original", "data-src", "data-main", "src", "style"};
         
-        // 優先找 img 標籤
+        // 1. 優先找 img 標籤
         Elements imgs = el.select("img");
         for (Element img : imgs) {
             for (String a : attrs) {
@@ -172,15 +169,15 @@ public class KaiGeSmart {
                         val = val.substring(val.indexOf("url(") + 4, val.lastIndexOf(")")).replace("'", "").replace("\"", "");
                     } catch (Exception ignored) {}
                 }
-                // 排除佔位圖，只返回真實圖片
+                // 排除佔位圖，只返回真實圖片地址
                 if (!val.isEmpty() && !val.contains(".gif") && (val.startsWith("http") || val.startsWith("/"))) {
                     return val;
                 }
             }
         }
 
-        // 備選方案：找帶有背景圖或 lazyload 類名的容器 (div 或 a)
-        Element thumb = el.selectFirst("[style*='url'], .lazyload, .videopic, .cover");
+        // 2. 備選方案：找帶有背景圖或 lazyload 類名的容器 (div 或 a)
+        Element thumb = el.selectFirst("[style*='url'], .lazyload, .videopic, .cover, .thumb");
         if (thumb != null) {
             String style = thumb.attr("style");
             if (style != null && style.contains("url(")) {
@@ -190,12 +187,11 @@ public class KaiGeSmart {
             }
             for (String a : attrs) {
                 String val = thumb.attr(a).trim();
-                if (!val.isEmpty() && !val.contains(".gif")) return val;
+                if (!val.isEmpty() && !val.contains(".gif") && (val.startsWith("http") || val.startsWith("/"))) return val;
             }
         }
         return "";
     }
-
 
     public static String findTitle(Element el) {
         String t = el.attr("title").trim();
@@ -206,7 +202,7 @@ public class KaiGeSmart {
         return t;
     }
 
-    // 🚀 3. 強化版 URL 提取器：優先找影視詳情連結
+    // 🚀 6. 強化版 URL 提取器：優先找影視詳情連結
     public static String findUrl(Element el) {
         // 優先找包含影視特徵字樣的連結，排除掉廣告或無關 a 標籤
         Element a = el.selectFirst("a[href*='vod'], a[href*='detail'], a[href*='show'], a[href*='play'], a[href*='.html']");
@@ -221,5 +217,4 @@ public class KaiGeSmart {
         }
         return "";
     }
-
 }
