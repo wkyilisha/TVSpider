@@ -383,44 +383,76 @@ public class KG extends Spider {
 @Override
 public String homeContent(boolean filter) {
     try {
-        logger("🏠 [主頁] 正在加載分類導航...");
+        logger("🏠 [主頁] 正在加載動態分類與智慧篩選...");
+
+        // 1. 從 JSON 規則中獲取基礎分類
         JSONArray classes = rule.optJSONArray("classes");
-        
         if (classes == null || classes.length() == 0) {
-            logger("🚨 [主頁] 警告：JSON 規則中未定義 classes 或格式錯誤");
+            logger("🚨 [主頁] 錯誤：JSON 規則中未定義 classes");
             return "";
         }
 
-        // 🚀 凱哥特製：字段自動對接
-        // 很多 JSON 寫的是 type_name/type_id，有些殼子要的是 name/id
-        // 我們在這裡做一個轉換，保證 100% 顯示
+        JSONObject result = new JSONObject();
         JSONArray resultClasses = new JSONArray();
+        JSONObject filterList = new JSONObject();
+
+        // 2. 遍歷分類，進行數據轉換與智慧嗅探
         for (int i = 0; i < classes.length(); i++) {
-            JSONObject oldCate = classes.getJSONObject(i);
+            JSONObject clsObj = classes.getJSONObject(i);
+
+            // 兼容不同格式的 ID 和 Name
+            String name = clsObj.optString("type_name", clsObj.optString("name"));
+            String id = clsObj.optString("type_id", clsObj.optString("id"));
+
+            // 獲取分類的原始 URL (對應 JSON 裡的 type_url 或 url 字段)
+            String typeUrl = clsObj.optString("type_url", clsObj.optString("url"));
+
+            // 構建返回給殼子的標準分類對象
             JSONObject newCate = new JSONObject();
-            
-            String name = oldCate.optString("type_name", oldCate.optString("name"));
-            String id = oldCate.optString("type_id", oldCate.optString("id"));
-            
             newCate.put("type_name", name);
             newCate.put("type_id", id);
             resultClasses.put(newCate);
+
+            // 🚀 3. 智慧嗅探：如果開啟 filter 且 URL 不為空，則動態抓取該頁面的篩選項
+            if (filter && !TextUtils.isEmpty(typeUrl)) {
+                try {
+                    logger("🔍 [智慧嗅探] 正在分析分類: " + name + " -> " + typeUrl);
+
+                    // 請求該分類的第一頁 HTML
+                    String html = OkHttpUtil.string(typeUrl, getHeaders());
+
+                    // 調用 KaiGeFilter 進行嗅探
+                    JSONObject smartFilters = KaiGeFilter.getSmartFilters(html);
+
+                    if (smartFilters != null && smartFilters.length() > 0) {
+                        filterList.put(id, smartFilters);
+                        logger("✅ [智慧嗅探] 分類 " + name + " 篩選加載成功");
+                    }
+                } catch (Exception e) {
+                    logger("⚠️ [智慧嗅探] 分類 " + name + " 抓取失敗: " + e.getMessage());
+                }
+            }
         }
 
-        logger("✅ [主頁] 分類加載成功，共 " + resultClasses.length() + " 個頻道");
-        
-        JSONObject result = new JSONObject();
+        // 封裝最終結果
         result.put("class", resultClasses);
-        
-        // 如果規則裡有篩選數據(filters)，也可以在這裡放進去
-        if (rule.has("filters")) {
+
+        // 4. 優先級判斷：動態優先，JSON 規則備選
+        if (filterList.length() > 0) {
+            result.put("filters", filterList);
+            logger("🚀 [主頁] 動態智慧篩選已生效");
+        } else if (rule.has("filters")) {
             result.put("filters", rule.optJSONObject("filters"));
+            logger("ℹ️ [主頁] 未嗅探到新數據，使用 JSON 內預設篩選");
         }
-        
+
+        logger("✅ [主頁] 分類加載完成，共 " + resultClasses.length() + " 個頻道");
         return result.toString();
+
     } catch (Exception e) {
         logger("🚨 [主頁異常]: " + e.getMessage());
         return "";
     }
 }
+
 }
