@@ -44,16 +44,43 @@ public class KG extends Spider {
         try {
             logger("------------------------------------------");
             logger("🚀❤️ <b>凱哥全能獨立引擎啟動 (Full Power)...</b>");
-            // 升級：初始化請求也走智慧通道
-            String json = extend.startsWith("http") ? KaiGeNet.smartRequest(extend, "get", extend, null, null).getBody() : extend;
+            
+            if (TextUtils.isEmpty(extend)) {
+                logger("🚨 [系統] 初始化失敗: 配置路徑為空");
+                return;
+            }
+
+            String json;
+            if (extend.startsWith("http")) {
+                // 🚀 關鍵修復：手動過濾掉可能包含中文的 Referer 隱患
+                Map<String, String> initHeaders = new HashMap<>();
+                initHeaders.put("Referer", ""); // 清空 Referer，防止 OkHttp 報錯
+                
+                // 使用最原始的 OkHttp 請求，避免被 smartRequest 裡的自動 Header 帶偏
+                OkResult res = OkHttp.get(extend, null, initHeaders);
+                json = res.getBody();
+            } else {
+                json = extend;
+            }
+
+            if (TextUtils.isEmpty(json) || !json.trim().startsWith("{")) {
+                logger("🚨 [系統] 初始化失敗: 讀取到的 JSON 格式不正確");
+                return;
+            }
+
             this.rule = new JSONObject(json);
+            // 🚀 從配置中自動提取域名
             this.siteUrl = rule.optString("site_url", rule.optString("host", ""));
+
             logger("✅ [系統] 站點配置加載完成: " + rule.optString("site_name"));
             logger("🌐 [系統] 域名自動綁定: " + this.siteUrl);
+            
         } catch (Exception e) {
-            logger("🚨 [系統] 初始化失敗: " + e.getMessage());
+            // 這裡會捕獲到 Unexpected char 報錯並顯示
+            logger("🚨 [系統] 初始化崩潰: " + e.getMessage());
         }
     }
+
 
     @Override
     public String categoryContent(String tid, String pg, boolean f, HashMap<String, String> e) {
