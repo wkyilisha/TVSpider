@@ -11,34 +11,26 @@ import java.util.*;
 
 public class KaiGeSmart {
 
-    /**
-     * 🚀 通用打包器：自動識別 JSON API 或 HTML 網頁
-     */
     public static String buildResult(String data) {
         try {
             if (TextUtils.isEmpty(data)) return "{\"list\":[]}";
             String trimData = data.trim();
-            
-            if (trimData.startsWith("{")) {
-                return trimData; 
-            }
+            if (trimData.startsWith("{")) return trimData; 
             
             JSONObject result = new JSONObject();
             JSONArray list = new JSONArray();
             Document doc = Jsoup.parse(trimData);
             
-            // 💡 升級：1. 先按常見類名精準找
-            Elements items = doc.select(".myui-vodlist__item, .vodlist_item, .fed-list-item, .pack-ykpack, .list-item, .v-item, .module-item, .stui-vodlist__item, li:has(img)");
+            // 💡 JSON 規則優先：如果傳入的是片段，直接解析其子節點
+            Elements items = doc.body().children();
             
-            // 💡 升級：2. 如果抓不到，啟動「暴力掃描」：尋找所有包含圖片的 A 標籤
-            if (items.isEmpty()) {
-                items = doc.select("a:has(img)");
+            // 💡 保底邏輯：如果傳入整頁，自動識別容器
+            if (items.size() < 3) {
+                items = doc.select(".myui-vodlist__item, .vodlist_item, .fed-list-item, .pack-ykpack, .list-item, .v-item, .module-item, .stui-vodlist__item, li:has(img), a:has(img)");
             }
             
             for (Element el : items) {
-                // 根據 el 的類型（是容器還是 A 標籤本身）智慧解析
                 JSONObject vod = parseList(el);
-                // 確保 ID 和標題不為空才加入
                 if (vod.has("vod_id") && !TextUtils.isEmpty(vod.optString("vod_name"))) {
                     list.put(vod);
                 }
@@ -50,21 +42,12 @@ public class KaiGeSmart {
         }
     }
 
-    /**
-     * 🚀 詳情打包器
-     */
     public static String buildDetail(String data) {
         try {
             if (TextUtils.isEmpty(data)) return "{\"list\":[]}";
-            String trimData = data.trim();
-
-            if (trimData.startsWith("{")) {
-                return trimData;
-            }
-
             JSONObject result = new JSONObject();
             JSONArray list = new JSONArray();
-            list.put(parseDetail(trimData));
+            list.put(parseDetail(data));
             result.put("list", list);
             return result.toString();
         } catch (Exception e) {
@@ -77,11 +60,11 @@ public class KaiGeSmart {
         try {
             String id = findUrl(el);
             if (TextUtils.isEmpty(id) || id.contains("javascript")) return vod;
-
+            
             String name = findTitle(el);
             String pic = findPic(el);
 
-            // 如果在當前節點找不到圖或名，去它的父節點範圍擴大搜索（適配 a:has(img) 模式）
+            // 智慧回溯父節點（適配 a:has(img) 結構）
             if (TextUtils.isEmpty(pic) || TextUtils.isEmpty(name)) {
                 Element p = el.parent();
                 if (p != null) {
@@ -91,40 +74,22 @@ public class KaiGeSmart {
             }
 
             if (TextUtils.isEmpty(name)) return vod;
-
+            
             vod.put("vod_name", name);
             vod.put("vod_id", id);
             vod.put("vod_pic", pic);
-
-            // 🚀 核心修復：更穩定的更新狀態抓取
+            
+            // 狀態備註抓取
             String remarks = "";
-            // 優先找特定標籤
-            Element remarkNode = el.selectFirst(".pic-text, .remarks, .state, .pic-tag-bottom, .tag, .label, .badge, .pic-tag, .text-right, .status");
-            if (remarkNode != null) {
-                remarks = remarkNode.text().trim();
-            }
-
-            // 語義掃描補底
-            if (TextUtils.isEmpty(remarks) || (remarks.contains("分") && remarks.length() < 5)) {
+            Element remarkNode = el.selectFirst(".pic-text, .remarks, .state, .pic-tag-bottom, .tag, .label, .badge, .pic-tag, .status");
+            if (remarkNode != null) remarks = remarkNode.text().trim();
+            if (TextUtils.isEmpty(remarks)) {
                 Elements tags = el.select("span, em, b, i, p");
                 for (Element tag : tags) {
                     String text = tag.text().trim();
-                    if (text.matches(".*(更新|至|[0-9]集|期|完|版|HD|BD|TS|字|蓝|藍).*")) {
-                        if (text.contains("分") && text.length() < 4) continue;
+                    if (text.matches(".*(更新|至|[0-9]集|期|完|版|HD|BD|TS|蓝|藍).*")) {
                         remarks = text;
                         break; 
-                    }
-                }
-            }
-            
-            // 降級找數字
-            if (TextUtils.isEmpty(remarks)) {
-                Elements spans = el.select("span");
-                for (int i = spans.size() - 1; i >= 0; i--) {
-                    String sText = spans.get(i).text().trim();
-                    if (sText.matches(".*[0-9完].*")) {
-                        remarks = sText;
-                        break;
                     }
                 }
             }
@@ -168,7 +133,7 @@ public class KaiGeSmart {
         try {
             List<String> fromList = new ArrayList<>();
             List<String> urlList = new ArrayList<>();
-            Elements tabs = doc.select(".tabs li, .line-title, .from-list li, [data-line], .playlist-tab li, .myui-panel__head li, .module-tab-item, .anthology-tab a");
+            Elements tabs = doc.select(".tabs li, .line-title, .from-list li, .playlist-tab li, .myui-panel__head li, .module-tab-item, .anthology-tab a");
             Elements blocks = doc.select(".playlist, .content_playlist, .play-list-box, #playlist, .myui-content__list, .myui-panel_bd .tab-content, .module-play-list, .anthology-list-box");
 
             if (blocks.isEmpty()) {
@@ -205,48 +170,46 @@ public class KaiGeSmart {
         return sb.toString();
     }
 
+    /**
+     * 🚀 圖片提取：data-original 優先級最高
+     */
     public static String findPic(Element el) {
-        // 1. 處理 img 標籤
         Elements imgs = el.select("img");
         for (Element img : imgs) {
-            String[] attrs = {"data-original", "data-src", "src", "data-main", "data-lazy-src"};
+            // 💡 調整後的優先級列表：高清原圖優先
+            String[] attrs = {"data-original", "data-src", "src", "data-main", "data-lazy-src", "data-srcset", "_src"};
             for (String a : attrs) {
                 String val = img.attr(a).trim();
                 if (!val.isEmpty() && !val.contains(".gif") && (val.startsWith("http") || val.startsWith("/") || val.startsWith("//"))) {
-                    return val;
+                    return fixUrl(val);
                 }
             }
         }
-        // 2. 處理背景圖
-        Elements bgs = el.select("[style*='url']");
-        if (bgs.isEmpty() && el.attr("style").contains("url(")) bgs.add(el); 
-        for (Element bg : bgs) {
-            String style = bg.attr("style");
-            if (style.contains("url(")) {
-                try {
-                    String val = style.substring(style.indexOf("url(") + 4, style.lastIndexOf(")")).replace("'", "").replace("\"", "");
-                    if (!val.isEmpty() && !val.contains(".gif") && (val.startsWith("http") || val.startsWith("/") || val.startsWith("//"))) {
-                        return val;
-                    }
-                } catch (Exception ignored) {}
-            }
+        // 背景圖兜底
+        String style = el.attr("style");
+        if (style.contains("url(")) {
+            try {
+                String val = style.substring(style.indexOf("url(") + 4, style.lastIndexOf(")")).replace("'", "").replace("\"", "");
+                if (!val.isEmpty() && !val.contains(".gif")) return fixUrl(val);
+            } catch (Exception ignored) {}
         }
         return "";
     }
 
+    private static String fixUrl(String url) {
+        if (TextUtils.isEmpty(url)) return "";
+        if (url.startsWith("//")) return "http:" + url;
+        return url;
+    }
+
     public static String findTitle(Element el) {
-        // 1. 優先從 a 的 title 或 img 的 alt 抓
         String t = el.attr("title").trim();
         if (t.isEmpty()) t = el.select("a").attr("title").trim();
         if (t.isEmpty()) t = el.select("img").attr("alt").trim();
-        
-        // 2. 找特定的標題標籤
         if (t.isEmpty()) {
             Element h = el.selectFirst("h1,h2,h3,h4,.title,.name,.module-item-title");
             t = (h != null) ? h.text().trim() : "";
         }
-        
-        // 3. 兜底找第一個 a 的文本
         if (t.isEmpty()) {
             Element a = el.selectFirst("a");
             t = (a != null) ? a.text().trim() : "";
@@ -255,8 +218,7 @@ public class KaiGeSmart {
     }
 
     public static String findUrl(Element el) {
-        // 增加識別常見連結特徵
-        Element a = el.selectFirst("a[href*='vod'], a[href*='detail'], a[href*='show'], a[href*='play'], a[href*='v-'], a[href$='.html']");
+        Element a = el.selectFirst("a[href*='vod'], a[href*='detail'], a[href*='play'], a[href*='v-'], a[href$='.html']");
         if (a == null) a = el.is("a") ? el : el.selectFirst("a");
         return a != null ? a.attr("href") : "";
     }
