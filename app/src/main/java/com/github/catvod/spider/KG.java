@@ -398,49 +398,98 @@ public class KG extends Spider {
 
 private String parseList(String html, String pg, boolean isSearch) {
     try {
-        Document doc = Jsoup.parse(html);
         JSONArray list = new JSONArray();
         String prefix = isSearch ? "sc_" : "cate_";
         
-        // 取出你在 JSON 寫的容器定位
-        String itemRule = rule.optString(prefix + "item", rule.optString("cate_item"));
-        Elements items = doc.select(itemRule);
-        
-        for (Element item : items) {
-            // 🚀 調用凱哥智慧識別
-            JSONObject smartVod = KaiGeSmart.parseList(item);
-            
-            JSONObject vod = new JSONObject();
-            
-            // 1. ID 處理：規則優先，保底用智慧識別
-            String vId = extract(item, rule.optString(prefix + "id", rule.optString("cate_id")));
-            if (TextUtils.isEmpty(vId)) vId = smartVod.optString("vod_id");
-            
-            // 💡 修正：如果 ID 已經是 http 了就不拼 siteUrl
-            if (!TextUtils.isEmpty(vId)) {
-                vod.put("vod_id", vId.startsWith("http") ? vId : this.siteUrl + (vId.startsWith("/") ? "" : "/") + vId);
+        // 🚀 凱哥全能引擎：第一步判斷數據格式
+        // 如果數據以 { 開頭且包含 list，判定為 JSON 接口返回
+        if (html.trim().startsWith("{") && html.contains("\"list\"")) {
+            JSONObject json = new JSONObject(html);
+            JSONArray array = json.optJSONArray("list");
+            if (array != null) {
+                // 獲取 JSON 專用的詳情模板
+                String detailTemplate = rule.optString("detail_url", "");
+                
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject item = array.getJSONObject(i);
+                    JSONObject vod = new JSONObject();
+                    
+                    // 1. ID 處理：JSON 裡通常字段名就是 id
+                    String vId = item.optString("id");
+                    if (!TextUtils.isEmpty(vId)) {
+                        // 如果有模板且不是完整網址，則套用模板 (解決 qkw1 搜索問題)
+                        if (!detailTemplate.isEmpty() && !vId.startsWith("http")) {
+                            vod.put("vod_id", detailTemplate.replace("{id}", vId));
+                        } else {
+                            // 否則補全域名或保持原樣
+                            vod.put("vod_id", vId.startsWith("http") ? vId : this.siteUrl + (vId.startsWith("/") ? "" : "/") + vId);
+                        }
+                    }
+
+                    // 2. 標題 (從 JSON 直接取)
+                    vod.put("vod_name", item.optString("name"));
+                    
+                    // 3. 圖片 (從 JSON 直接取並補全)
+                    String vPic = item.optString("pic");
+                    if (!TextUtils.isEmpty(vPic) && vPic.startsWith("//")) vPic = "http:" + vPic;
+                    vod.put("vod_pic", vPic);
+                    
+                    // 4. 備註
+                    vod.put("vod_remarks", item.optString("remarks"));
+                    
+                    if (vod.has("vod_id")) list.add(vod);
+                }
             }
+        } else {
+            // 🚀 否則走原本的 HTML / Jsoup 爬蟲邏輯
+            Document doc = Jsoup.parse(html);
+            
+            // 取出你在 JSON 寫的容器定位
+            String itemRule = rule.optString(prefix + "item", rule.optString("cate_item"));
+            Elements items = doc.select(itemRule);
+            
+            // 獲取詳情模板
+            String detailTemplate = rule.optString("detail_url", "");
 
-            // 2. 標題：智慧識別已經很準了，直接保底
-            String vName = extract(item, rule.optString(prefix + "name", rule.optString("cate_name")));
-            vod.put("vod_name", TextUtils.isEmpty(vName) ? smartVod.optString("vod_name") : vName);
-            
-            // 3. 圖片：這裡會直接用到 KaiGeSmart 裡你要求的高清優先邏輯
-            String vPic = extract(item, rule.optString(prefix + "pic", rule.optString("cate_pic")));
-            if (TextUtils.isEmpty(vPic)) vPic = smartVod.optString("vod_pic");
-            
-            // 💡 修正：圖片連結補全
-            if (!TextUtils.isEmpty(vPic) && vPic.startsWith("//")) vPic = "http:" + vPic;
-            vod.put("vod_pic", vPic);
-            
-            // 4. 備註
-            String vRemarks = extract(item, rule.optString(prefix + "remarks", rule.optString("cate_remarks")));
-            vod.put("vod_remarks", TextUtils.isEmpty(vRemarks) ? smartVod.optString("vod_remarks") : vRemarks);
+            for (Element item : items) {
+                // 🚀 調用凱哥智慧識別保底
+                JSONObject smartVod = KaiGeSmart.parseList(item);
+                JSONObject vod = new JSONObject();
+                
+                // 1. ID 處理：規則優先，保底用智慧識別
+                String vId = extract(item, rule.optString(prefix + "id", rule.optString("cate_id")));
+                if (TextUtils.isEmpty(vId)) vId = smartVod.optString("vod_id");
+                
+                if (!TextUtils.isEmpty(vId)) {
+                    // 凱哥邏輯：如果是搜索且有模板，則執行替換；否則補全域名
+                    if (isSearch && !detailTemplate.isEmpty() && !vId.startsWith("http")) {
+                        vod.put("vod_id", detailTemplate.replace("{id}", vId));
+                    } else {
+                        vod.put("vod_id", vId.startsWith("http") ? vId : this.siteUrl + (vId.startsWith("/") ? "" : "/") + vId);
+                    }
+                }
 
-            if (vod.has("vod_id")) list.put(vod);
+                // 2. 標題：智慧識別保底
+                String vName = extract(item, rule.optString(prefix + "name", rule.optString("cate_name")));
+                vod.put("vod_name", TextUtils.isEmpty(vName) ? smartVod.optString("vod_name") : vName);
+                
+                // 3. 圖片：智慧識別保底並補全
+                String vPic = extract(item, rule.optString(prefix + "pic", rule.optString("cate_pic")));
+                if (TextUtils.isEmpty(vPic)) vPic = smartVod.optString("vod_pic");
+                if (!TextUtils.isEmpty(vPic) && vPic.startsWith("//")) vPic = "http:" + vPic;
+                vod.put("vod_pic", vPic);
+                
+                // 4. 備註
+                String vRemarks = extract(item, rule.optString(prefix + "remarks", rule.optString("cate_remarks")));
+                vod.put("vod_remarks", TextUtils.isEmpty(vRemarks) ? smartVod.optString("vod_remarks") : vRemarks);
+
+                if (vod.has("vod_id")) list.put(vod);
+            }
         }
         return new JSONObject().put("list", list).put("page", pg).toString();
-    } catch (Exception e) { return "{\"list\":[]}"; }
+    } catch (Exception e) { 
+        return "{\"list\":[]}"; 
+    }
 }
 
     private String extract(Object root, String ruleStr) {
