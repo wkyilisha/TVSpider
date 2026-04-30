@@ -223,11 +223,13 @@ public class KG extends Spider {
         vod.put("vod_play_url", TextUtils.join("$$$", playList));
     }
 
-    @Override
+@Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
         String originalUrl = id.startsWith("/") && !id.startsWith("//") ? this.siteUrl + id : id;
         try {
-            logger("<br>🎬 <b>[播放解析啟動]</b>");
+            // 🎬 啟動日誌
+            Proxy.log("<b style='color:#e74c3c;'>🎬 [播放解析啟動]</b> 原始ID: " + originalUrl);
+            
             varPool.clear();
             varPool.put("play_id", originalUrl);
             varPool.put("final_url", originalUrl); 
@@ -243,6 +245,7 @@ public class KG extends Spider {
                 res.put("parse", isStream ? 0 : 1);
                 res.put("url", originalUrl);
                 res.put("header", getPlayHeaders(play));
+                Proxy.log("<b style='color:#2ecc71;'>🚀 [Direct] 無解析步驟，直接推送原始地址</b>");
                 return res.toString();
             }
 
@@ -252,8 +255,15 @@ public class KG extends Spider {
                 String stepUrl = replaceStepVars(step.optString("url", varPool.get("final_url")));
                 String method = step.optString("method", "get");
                 
-                // 🚀 升級：播放步驟也使用 KaiGeNet
-                OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, stepUrl, replaceStepVars(step.optString("body")), getHeaders(step.optJSONObject("headers")));
+                // 💡 獲取當前步驟的請求頭
+                Map<String, String> headers = getHeaders(step.optJSONObject("headers"));
+                
+                // 🚀 凱哥監控：Step 請求細節（含 URL 和 Headers）
+                Proxy.log("<span style='color:#3498db;'>[Step " + (i + 1) + " 請求]</span> " + method.toUpperCase() + " -> " + stepUrl);
+                Proxy.log("<span style='color:#9b59b6;'>[請求頭查看]</span> " + headers.toString());
+
+                // 🚀 使用 KaiGeNet 發起請求
+                OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, stepUrl, replaceStepVars(step.optString("body")), headers);
                 String html = res.getBody();
                 logCheck("解析 Step " + (i + 1), html, true);
 
@@ -271,6 +281,10 @@ public class KG extends Spider {
                         }
                         if (!TextUtils.isEmpty(val)) {
                             varPool.put(k, val);
+                            
+                            // 💡 變量提取監控
+                            Proxy.log("   └─ <span style='color:#f1c40f;'>[變量提取]</span> " + k + " = " + (val.length() > 80 ? val.substring(0, 80) + "..." : val));
+
                             if (k.contains("url") || k.matches("p[1-4]")) {
                                 varPool.put("final_url", val); 
                                 currentStepAnyOk = true;
@@ -289,8 +303,15 @@ public class KG extends Spider {
             resJson.put("parse", pValue);
             resJson.put("url", (pValue == 0) ? finalUrl : originalUrl);
             resJson.put("header", getPlayHeaders(play));
-            return resJson.toString();
+            
+            // 🚀 最終推送 JSON 日誌
+            String finalPush = resJson.toString();
+            Proxy.log("<b style='color:#2ecc71;'>🚀 [Final:推送 JSON]</b>");
+            Proxy.log("<div style='background:#1a1a1a; color:#00ff00; padding:8px; border:1px solid #2ecc71; font-family:monospace;'>" + finalPush + "</div>");
+
+            return finalPush;
         } catch (Exception e) {
+            Proxy.log("<b style='color:red;'>❌ [播放解析崩潰]:</b> " + e.getMessage());
             return "{\"parse\":1,\"url\":\"" + originalUrl + "\",\"header\":{}}";
         }
     }
