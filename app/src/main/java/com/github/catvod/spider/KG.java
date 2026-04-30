@@ -167,33 +167,21 @@ public class KG extends Spider {
             
             // 1. 動態讀取詳情配置
             String method = rule.optString("detail_method", "get").toLowerCase();
-            String detailRule = rule.optString("detail_url", ""); // 🚀 凱哥新增：獲取詳情模板
-            String url = id;
-
-            // 🚀 核心邏輯：如果 id 是純數字且有模板，則按模板拼裝；否則走原有的路徑邏輯
-            if (!id.startsWith("http") && !id.contains("/") && !detailRule.isEmpty()) {
-                url = detailRule.replace("{id}", id);
-            }
-
-            // 補全域名邏輯 (保持原有邏輯並增強)
-            if (!url.startsWith("http")) {
-                url = id.startsWith("http") ? id : this.siteUrl + (url.startsWith("/") ? "" : "/") + url;
-            }
-
+            String url = id.startsWith("http") ? id : this.siteUrl + (id.startsWith("/") ? "" : "/") + id;
             String body = rule.optString("detail_body", "");
 
             // 2. 處理變量替換 (POST 傳原始值，GET 傳編碼值)
             if (method.equals("post")) {
                 body = body.replace("{id}", id);
             } else {
-                // 如果 URL 包含 {id} 佔位符則替換 (這處理模板內部的 id)，否則保持原有拼接邏輯
+                // 如果 URL 包含 {id} 佔位符則替換，否則保持原有拼接邏輯
                 if (url.contains("{id}")) {
                     url = url.replace("{id}", URLEncoder.encode(id, "UTF-8"));
                 }
             }
 
             // 💡 凱哥監控：詳情請求日誌
-            Proxy.log("<b style='color:#f39c12;'>📋 [詳情啟動]</b> 方法: " + method.toUpperCase() + " | 請求網址: " + url);
+            Proxy.log("<b style='color:#f39c12;'>📋 [詳情啟動]</b> 方法: " + method.toUpperCase() + " | ID: " + id);
             if (method.equals("post")) {
                 Proxy.log("<span style='color:#f1c40f;'>[POST參數]</span> " + body);
             }
