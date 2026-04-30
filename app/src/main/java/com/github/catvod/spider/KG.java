@@ -104,14 +104,13 @@ public class KG extends Spider {
             String url = rule.optString("search_url");
             String body = rule.optString("search_body", "");
 
-            // 2. 處理關鍵字替換
-            String encodedKey = URLEncoder.encode(key, "UTF-8");
+            // 2. 處理關鍵字替換 (🚀 修復二次編碼問題)
             if (method.equals("post")) {
-                // POST 模式：替換 body 裡的 {wd}
-                body = body.replace("{wd}", encodedKey);
+                // POST 模式：直接用原始 key，交給底層 KaiGeNet/OkHttp 自動編碼，防止 % 變成 %25
+                body = body.replace("{wd}", key);
             } else {
-                // GET 模式：替換 url 裡的 {wd}
-                url = url.replace("{wd}", encodedKey);
+                // GET 模式：必須手動編碼，因為 URL 字符串拼接不支持原始中文
+                url = url.replace("{wd}", URLEncoder.encode(key, "UTF-8"));
             }
 
             // 域名補全
