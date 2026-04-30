@@ -96,19 +96,42 @@ public class KG extends Spider {
         } catch (Exception ex) { return "{\"list\":[]}"; }
     }
 
-    @Override
+@Override
     public String searchContent(String key, boolean quick) {
         try {
-            String url = rule.optString("search_url").replace("{wd}", URLEncoder.encode(key, "UTF-8"));
+            // 1. 動態讀取規則中的方法、網址和 Body
+            String method = rule.optString("search_method", "get").toLowerCase();
+            String url = rule.optString("search_url");
+            String body = rule.optString("search_body", "");
+
+            // 2. 處理關鍵字替換
+            String encodedKey = URLEncoder.encode(key, "UTF-8");
+            if (method.equals("post")) {
+                // POST 模式：替換 body 裡的 {wd}
+                body = body.replace("{wd}", encodedKey);
+            } else {
+                // GET 模式：替換 url 裡的 {wd}
+                url = url.replace("{wd}", encodedKey);
+            }
+
+            // 域名補全
             if (url.contains("{host}")) url = url.replace("{host}", this.siteUrl);
             else if (url.startsWith("/") && !url.startsWith("//")) url = this.siteUrl + url;
 
-            logger("🔍 [搜索] 關鍵字: " + key + " | 網址: " + url);
-            // 🚀 升級：使用 KaiGeNet
-            OkResult res = KaiGeNet.smartRequest(this.siteUrl, "get", url, null, getHeaders(null));
+            // 💡 凱哥監控：這裡是關鍵，看紫色和藍色日誌的輸出
+            Proxy.log("<b style='color:#3498db;'>🔍 [搜索啟動]</b> 方法: " + method.toUpperCase());
+            Proxy.log("<span style='color:#9b59b6;'>[搜索網址]</span> " + url);
+            if (method.equals("post")) {
+                Proxy.log("<span style='color:#f1c40f;'>[POST參數]</span> " + body);
+            }
+
+            // 3. 🚀 關鍵修復：將寫死的 "get" 改為動態 method，將 null 改為 body
+            OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
+            
             logCheck("搜索", res.getBody(), false);
             return parseList(res.getBody(), "1", true);
         } catch (Exception e) { 
+            Proxy.log("<b style='color:red;'>🚨 [搜索異常]:</b> " + e.getMessage());
             return "{\"list\":[]}"; 
         }
     }
