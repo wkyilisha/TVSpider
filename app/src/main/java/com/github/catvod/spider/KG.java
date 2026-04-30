@@ -82,18 +82,43 @@ public class KG extends Spider {
     }
 
 
-    @Override
+@Override
     public String categoryContent(String tid, String pg, boolean f, HashMap<String, String> e) {
         try {
-            String url = (pg.equals("1") && rule.has("cate_page_1") ? rule.optString("cate_page_1") : rule.optString("cate_url"))
-                    .replace("{tid}", tid).replace("{pg}", pg);
+            // 1. 動態讀取分類配置
+            String method = rule.optString("cate_method", "get").toLowerCase();
+            String url = (pg.equals("1") && rule.has("cate_page_1") ? rule.optString("cate_page_1") : rule.optString("cate_url"));
+            String body = rule.optString("cate_body", "");
+
+            // 2. 處理變量替換與編碼 (POST 傳原始值，GET 傳編碼值)
+            if (method.equals("post")) {
+                // POST 模式：直接替換原始變量，防止二次編碼
+                url = url.replace("{tid}", tid).replace("{pg}", pg);
+                body = body.replace("{tid}", tid).replace("{pg}", pg);
+            } else {
+                // GET 模式：對變量進行手動編碼拼接 URL
+                String eTid = URLEncoder.encode(tid, "UTF-8");
+                String ePg = URLEncoder.encode(pg, "UTF-8");
+                url = url.replace("{tid}", eTid).replace("{pg}", ePg);
+            }
+
             if (url.startsWith("/") && !url.startsWith("//")) url = this.siteUrl + url;
             
-            // 🚀 升級：使用 KaiGeNet
-            OkResult res = KaiGeNet.smartRequest(this.siteUrl, "get", url, null, getHeaders(null));
+            // 💡 凱哥監控：分類請求日誌
+            Proxy.log("<b style='color:#2ecc71;'>📂 [分類啟動]</b> 方法: " + method.toUpperCase() + " | TID: " + tid);
+            if (method.equals("post")) {
+                Proxy.log("<span style='color:#f1c40f;'>[POST參數]</span> " + body);
+            }
+
+            // 3. 🚀 升級：使用 KaiGeNet (將寫死的 "get" 改為動態 method，將 null 改為 body)
+            OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
+            
             logCheck("分類", res.getBody(), false);
             return parseList(res.getBody(), pg, false);
-        } catch (Exception ex) { return "{\"list\":[]}"; }
+        } catch (Exception ex) { 
+            Proxy.log("<b style='color:red;'>🚨 [分類異常]:</b> " + ex.getMessage());
+            return "{\"list\":[]}"; 
+        }
     }
 
 @Override
@@ -135,14 +160,34 @@ public class KG extends Spider {
         }
     }
 
-    @Override
+@Override
     public String detailContent(List<String> ids) {
         try {
             String id = ids.get(0);
-            String url = id.startsWith("http") ? id : this.siteUrl + (id.startsWith("/") ? "" : "/") + id;
             
-            // 🚀 升級：使用 KaiGeNet
-            OkResult res = KaiGeNet.smartRequest(this.siteUrl, "get", url, null, getHeaders(null));
+            // 1. 動態讀取詳情配置
+            String method = rule.optString("detail_method", "get").toLowerCase();
+            String url = id.startsWith("http") ? id : this.siteUrl + (id.startsWith("/") ? "" : "/") + id;
+            String body = rule.optString("detail_body", "");
+
+            // 2. 處理變量替換 (POST 傳原始值，GET 傳編碼值)
+            if (method.equals("post")) {
+                body = body.replace("{id}", id);
+            } else {
+                // 如果 URL 包含 {id} 佔位符則替換，否則保持原有拼接邏輯
+                if (url.contains("{id}")) {
+                    url = url.replace("{id}", URLEncoder.encode(id, "UTF-8"));
+                }
+            }
+
+            // 💡 凱哥監控：詳情請求日誌
+            Proxy.log("<b style='color:#f39c12;'>📋 [詳情啟動]</b> 方法: " + method.toUpperCase() + " | ID: " + id);
+            if (method.equals("post")) {
+                Proxy.log("<span style='color:#f1c40f;'>[POST參數]</span> " + body);
+            }
+
+            // 3. 🚀 升級：使用動態 method 和 body 調用 KaiGeNet
+            OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
             String html = res.getBody();
             logCheck("詳情", html, false);
 
@@ -185,6 +230,7 @@ public class KG extends Spider {
 
             return new JSONObject().put("list", new JSONArray().put(vod)).toString();
         } catch (Exception e) { 
+            Proxy.log("<b style='color:red;'>🚨 [詳情異常]:</b> " + e.getMessage());
             return ""; 
         }
     }
