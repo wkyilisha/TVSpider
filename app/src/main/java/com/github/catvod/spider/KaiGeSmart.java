@@ -15,27 +15,65 @@ public static String buildResult(String data, String key) {
         try {
             if (TextUtils.isEmpty(data)) return "{\"list\":[]}";
             String trimData = data.trim();
-            if (trimData.startsWith("{")) return trimData; 
-            
+
+            // 🚀 智慧識別 JSON 格式 (如蘋果 CMS 接口)
+            if (trimData.startsWith("{") || trimData.startsWith("[")) {
+                JSONObject json = new JSONObject(trimData);
+                // 優先取蘋果 CMS 規範的 list 數組，其次取 data 數組
+                JSONArray items = json.optJSONArray("list");
+                if (items == null) items = json.optJSONArray("data");
+
+                // 如果找不到數組，說明不是標準列表，回退原樣
+                if (items == null) return trimData;
+
+                JSONArray list = new JSONArray();
+                for (int i = 0; i < items.length(); i++) {
+                    JSONObject item = items.getJSONObject(i);
+                    JSONObject vod = new JSONObject();
+
+                    // 映射字段：id -> vod_id, name -> vod_name, pic -> vod_pic
+                    // 同時兼容蘋果 CMS 的標準字段名和簡寫名
+                    String vodId = item.optString("vod_id", item.optString("id"));
+                    String vodName = item.optString("vod_name", item.optString("name"));
+                    String vodPic = item.optString("vod_pic", item.optString("pic"));
+                    String vodRemarks = item.optString("vod_remarks", item.optString("remarks", ""));
+
+                    if (TextUtils.isEmpty(vodId) || TextUtils.isEmpty(vodName)) continue;
+
+                    // 💡 凱哥注意：關鍵字過濾邏輯
+                    if (!TextUtils.isEmpty(key) && !vodName.contains(key)) continue;
+
+                    vod.put("vod_id", vodId);
+                    vod.put("vod_name", vodName);
+                    vod.put("vod_pic", fixUrl(vodPic));
+                    vod.put("vod_remarks", vodRemarks);
+                    list.put(vod);
+                }
+                return new JSONObject().put("list", list).toString();
+            }
+
+            // ---------------------------------------------------------
+            // 💡 以下為 HTML 原有邏輯，保持不變
+            // ---------------------------------------------------------
             JSONObject result = new JSONObject();
             JSONArray list = new JSONArray();
             Document doc = Jsoup.parse(trimData);
-            
+
             // 💡 JSON 規則優先：如果傳入的是片段，直接解析其子節點
             Elements items = doc.body().children();
-            
+
             // 💡 保底邏輯：如果傳入整頁，自動識別容器
             if (items.size() < 3) {
                 items = doc.select(".myui-vodlist__item, .vodlist_item, .fed-list-item, .pack-ykpack, .list-item, .v-item, .module-item, .stui-vodlist__item, li:has(img), a:has(img)");
             }
-            
+
             for (Element el : items) {
                 JSONObject vod = parseList(el);
                 if (vod.has("vod_id") && !TextUtils.isEmpty(vod.optString("vod_name"))) {
-                    
+
                     // 💡 凱哥注意：這裡直接從 vod 裡取名字來比對
-                    if (!TextUtils.isEmpty(key) && !vod.optString("vod_name").contains(key)) continue; 
-                    
+                    if (!TextUtils.isEmpty(key) && !vod.optString("vod_name").contains(key)) continue;
+
                     list.put(vod);
                 }
             }
