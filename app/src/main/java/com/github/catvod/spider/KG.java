@@ -471,24 +471,32 @@ private String parseList(String html, String pg, boolean isSearch) {
     }
 }
 
-    private String extract(Object root, String ruleStr) {
+private String extract(Object root, String ruleStr) {
         try {
             if (TextUtils.isEmpty(ruleStr) || root == null) return "";
-            if (!ruleStr.contains("&&")) {
+            
+            // 🚀 關鍵點 1：讓規則支持變量替換
+            // 這樣你才能在規則裡寫 "{host}/vod/" 或者使用之前 vars 存下的 {kkk}
+            String realRule = replaceStepVars(ruleStr);
+
+            // 判斷是 Jsoup 選擇器還是 KaiGeEngine 規則
+            if (!realRule.contains("&&")) {
                 if (root instanceof Element) {
                     Element el = (Element) root;
-                    if (ruleStr.contains("@")) {
-                        String[] parts = ruleStr.split("@");
+                    if (realRule.contains("@")) {
+                        String[] parts = realRule.split("@");
                         Element target = parts[0].trim().isEmpty() ? el : el.selectFirst(parts[0].trim());
                         return target != null ? target.attr(parts[1].trim()) : "";
                     } else {
-                        Element target = el.selectFirst(ruleStr);
+                        Element target = el.selectFirst(realRule);
                         return target != null ? target.text() : "";
                     }
                 }
             } else {
+                // 🚀 關鍵點 2：調用凱哥 2.0 引擎
+                // 此時 realRule 已經是替換好變量的完整規則了
                 String content = (root instanceof Document) ? ((Document) root).outerHtml() : (root instanceof Element) ? ((Element) root).outerHtml() : root.toString();
-                return KaiGeEngine.doExtract(content, ruleStr, this.siteUrl).value;
+                return KaiGeEngine.doExtract(content, realRule, this.siteUrl).value;
             }
             return "";
         } catch (Exception e) { return ""; }
