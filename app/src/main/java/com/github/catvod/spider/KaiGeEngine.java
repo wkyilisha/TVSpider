@@ -5,6 +5,8 @@ import android.util.Base64;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.net.URLDecoder;
+import com.github.catvod.utils.Util;
+import com.github.catvod.utils.AESEncryption;
 
 /**
  * 凱哥標準規則引擎 2.0 (空格自由版)
@@ -73,6 +75,42 @@ public class KaiGeEngine {
         if (step.startsWith("[reg:")) {
             java.util.regex.Matcher m = java.util.regex.Pattern.compile(step.substring(5, step.length() - 1)).matcher(content);
             return m.find() ? m.group(1).trim() : "";
+        }
+        if (step.startsWith("[提取:") && step.endsWith("]")) {
+            String realRule = step.substring(4, step.length() - 1);
+            return executeSingleRule(content, realRule);
+        }
+
+        // 🚀 2. 參數自動排序 (九州空間等 API 必備)
+        if (step.equalsIgnoreCase("[sort_params]")) {
+            return com.github.catvod.utils.Util.sortQueryString(content);
+        }
+
+        // 🚀 3. 加密哈希標籤
+        if (step.equalsIgnoreCase("[md5]")) {
+            return com.github.catvod.utils.Util.MD5(content);
+        }
+        if (step.equalsIgnoreCase("[sha1]")) {
+            try {
+                return com.github.catvod.utils.Util.sha1Hex(content);
+            } catch (Exception e) {
+                return "";
+            }
+        }
+        if (step.startsWith("[aes_cbc:") && step.endsWith("]")) {
+            try {
+                String paramsStr = step.substring(9, step.length() - 1);
+                String[] p = paramsStr.split(",");
+                String key = p[0].trim();
+                String iv = (p.length > 1) ? p[1].trim() : "";
+                return com.github.catvod.utils.AESEncryption.decrypt(content, key, iv, com.github.catvod.utils.AESEncryption.CBC_PKCS_7_PADDING);
+            } catch (Exception e) { return ""; }
+        }
+        if (step.startsWith("[aes_ecb:") && step.endsWith("]")) {
+            try {
+                String key = step.substring(9, step.length() - 1).trim();
+                return com.github.catvod.utils.AESEncryption.decrypt(content, key, "", com.github.catvod.utils.AESEncryption.ECB_PKCS_7_PADDING);
+            } catch (Exception e) { return ""; }
         }
 
         // 🚀 3. 處理拼接：支持 + 號前後任意空格
