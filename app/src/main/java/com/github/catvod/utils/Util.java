@@ -311,6 +311,30 @@ public class Util {
         for (int i = 0; i < arr.size(); i++) if (arr.get(i).equals(value)) return i;
         return 0;
     }
+    // 🚀 凱哥專屬：通用參數排序拼接工具
+    public static String sortQueryString(String content) {
+        try {
+            if (content == null || content.isEmpty()) return "";
+            // 如果包含 ? 則只取參數部分，否則直接處理
+            String queryString = content.contains("?") ? content.split("\\?")[1] : content;
+            String[] pairs = queryString.split("&");
+            TreeMap<String, String> map = new TreeMap<>();
+            for (String pair : pairs) {
+                String[] kv = pair.split("=");
+                if (kv.length > 0) {
+                    map.put(kv[0], kv.length > 1 ? kv[1] : "");
+                }
+            }
+            StringBuilder sb = new StringBuilder();
+            for (Map.Entry<String, String> entry : map.entrySet()) {
+                if (sb.length() > 0) sb.append("&");
+                sb.append(entry.getKey()).append("=").append(entry.getValue());
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return content;
+        }
+    }
 
     public static String sha1Hex(String input) throws NoSuchAlgorithmException {
         try {
