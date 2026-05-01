@@ -80,6 +80,15 @@ public class KaiGeEngine {
             String realRule = step.substring(4, step.length() - 1);
             return executeSingleRule(content, realRule);
         }
+        // 🚀 7. 時間戳標籤
+        // [time] 生成 10 位秒級時間戳
+        if (step.equalsIgnoreCase("[time]")) {
+            return String.valueOf(System.currentTimeMillis() / 1000);
+        }
+        // [time13] 生成 13 位毫秒級時間戳
+        if (step.equalsIgnoreCase("[time13]")) {
+            return String.valueOf(System.currentTimeMillis());
+        }
 
         // 🚀 2. 參數自動排序 (九州空間等 API 必備)
         if (step.equalsIgnoreCase("[sort_params]")) {
