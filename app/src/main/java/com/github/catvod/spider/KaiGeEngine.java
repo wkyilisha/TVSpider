@@ -65,6 +65,20 @@ public class KaiGeEngine {
 
     private static String processStep(String content, String step, String host) {
         if (isEmpty(step)) return content;
+        // 🚀 新增：JSON 鍵值提取標籤 [json:key]
+    if (step.startsWith("[json:") && step.endsWith("]")) {
+        try {
+            String key = step.substring(6, step.length() - 1).trim();
+            // 預處理：清洗反斜槓，讓 JSONObject 能正常識別 URL
+            String cleanContent = content.replace("\\/", "/");
+            return new org.json.JSONObject(cleanContent).optString(key, "");
+        } catch (Exception e) {
+            // 暴力保底：如果返回的不是標准 JSON，用正則強行把 key 對應的 value 摳出來
+            String keyName = step.substring(6, step.length() - 1).trim();
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"" + keyName + "\"\\s*:\\s*\"(.*?)\"").matcher(content);
+            return m.find() ? m.group(1).replace("\\/", "/") : "";
+        }
+    }
 
         if (step.equalsIgnoreCase("[base64]")) {
             try { return new String(Base64.decode(content, Base64.DEFAULT)); } catch (Exception e) { return content; }
