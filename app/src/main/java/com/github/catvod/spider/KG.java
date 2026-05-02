@@ -330,12 +330,24 @@ public class KG extends Spider {
                 Proxy.log("<span style='color:#3498db;'>[Step " + (i + 1) + " 請求]</span> " + method.toUpperCase() + " -> " + stepUrl);
                 Proxy.log("<span style='color:#9b59b6;'>[請求頭查看]</span> " + headers.toString());
 
-                // 🚀 使用 KaiGeNet 發起請求
-                OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, stepUrl, replaceStepVars(step.optString("body")), headers);
-                String html = res.getBody();
-                logCheck("解析 Step " + (i + 1), html, true);
+            // 1. 發起請求
+            OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, stepUrl, replaceStepVars(step.optString("body")), getHeaders(step.optJSONObject("headers")));
+            String html = res.getBody();
+            
+            // 🚀 凱哥暴力監控：不論 html 是否為空，通通打印！
+            Proxy.log("<b style='color:#3498db;'>📥 [Step " + (i + 1) + " 返回監控]</b>");
+            if (TextUtils.isEmpty(html)) {
+                // 如果是空的，說明請求連通都沒通（可能是網址帶了特殊字符、引號或網絡超時）
+                Proxy.log("<b style='color:red;'>❌ [致命] 返回內容完全為空！</b> 請檢查 URL 格式或網絡連通性。");
+            } else {
+                // 🚀 核心：強制噴出前 500 字符源碼，確保你在日誌能看到數據「真身」
+                String preview = (html.length() > 500 ? html.substring(0, 500) : html)
+                                .trim().replace("\n", " ").replace("\r", " ");
+                Proxy.log("<div style='background:#2c3e50; color:#ecf0f1; padding:5px; border-left:5px solid #e74c3c;'>源碼預覽: " + preview.replace("<", "&lt;").replace(">", "&gt;") + "...</div>");
+            }
 
-                JSONObject vars = step.optJSONObject("vars");
+            // 2. 繼續執行變量提取
+            JSONObject vars = step.optJSONObject("vars");
                 if (vars != null) {
                     boolean currentStepAnyOk = false;
                     for (Iterator<String> it = vars.keys(); it.hasNext(); ) {
