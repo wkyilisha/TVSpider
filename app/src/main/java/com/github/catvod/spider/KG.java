@@ -348,27 +348,44 @@ public class KG extends Spider {
 
             // 2. 繼續執行變量提取
             JSONObject vars = step.optJSONObject("vars");
-                if (vars != null) {
+if (vars != null) {
                     boolean currentStepAnyOk = false;
                     for (Iterator<String> it = vars.keys(); it.hasNext(); ) {
                         String k = it.next();
-                        String vRule = vars.optString(k);
+                        String vRule = vars.optString(k).trim(); // 去掉可能存在的空格
                         String val = "";
+                        
+                        // 🚀 1. 增強型 JSON 提取
                         if (vRule.startsWith("json:")) {
-                            try { val = new JSONObject(html).optString(vRule.substring(5)); } catch (Exception e) { val = ""; }
+                            try {
+                                String keyName = vRule.substring(5).trim(); // 拿到 "url"
+                                JSONObject jsonObj = new JSONObject(html.trim());
+                                val = jsonObj.optString(keyName);
+                            } catch (Exception e) {
+                                Proxy.log("   └─ <b style='color:red;'>❌ JSON 解析失敗:</b> " + e.getMessage());
+                                val = "";
+                            }
                         } else {
                             val = KaiGeEngine.doExtract(html, vRule, this.siteUrl).value;
                         }
+
+                        // 🚀 2. 暴力清洗提取到的數據
                         if (!TextUtils.isEmpty(val)) {
+                            // 幹掉所有反斜槓，把 \/ 變成 /
+                            val = val.replace("\\/", "/").replace("\\", "").trim();
+                            
                             varPool.put(k, val);
                             
                             // 💡 變量提取監控
-                            Proxy.log("   └─ <span style='color:#f1c40f;'>[變量提取]</span> " + k + " = " + (val.length() > 80 ? val.substring(0, 80) + "..." : val));
+                            Proxy.log("    └─ <span style='color:#f1c40f;'>[提取成功]</span> " + k + " = " + (val.length() > 80 ? val.substring(0, 80) + "..." : val));
 
+                            // 🚀 3. 核心鎖定：只要 key 包含 url，就更新最終地址
                             if (k.contains("url") || k.matches("p[1-4]")) {
                                 varPool.put("final_url", val); 
                                 currentStepAnyOk = true;
                             }
+                        } else {
+                            Proxy.log("    └─ <b style='color:#95a5a6;'>⚠️ [提取為空]</b> 鍵: " + k + " | 規則: " + vRule);
                         }
                     }
                     if (i == stepCount - 1 && currentStepAnyOk) finalStepSuccess = true;
