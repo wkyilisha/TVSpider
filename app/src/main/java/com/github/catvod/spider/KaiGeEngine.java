@@ -65,20 +65,41 @@ public class KaiGeEngine {
 
     private static String processStep(String content, String step, String host) {
         if (isEmpty(step)) return content;
-        // 🚀 新增：JSON 鍵值提取標籤 [json:key]
-    if (step.startsWith("[json:") && step.endsWith("]")) {
-        try {
-            String key = step.substring(6, step.length() - 1).trim();
-            // 預處理：清洗反斜槓，讓 JSONObject 能正常識別 URL
-            String cleanContent = content.replace("\\/", "/");
-            return new org.json.JSONObject(cleanContent).optString(key, "");
-        } catch (Exception e) {
-            // 暴力保底：如果返回的不是標准 JSON，用正則強行把 key 對應的 value 摳出來
-            String keyName = step.substring(6, step.length() - 1).trim();
-            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"" + keyName + "\"\\s*:\\s*\"(.*?)\"").matcher(content);
-            return m.find() ? m.group(1).replace("\\/", "/") : "";
+// 🚀 凱哥特供版：兼容 json:key 和 [json:key] 兩種寫法，支持 data.url 嵌套路徑
+        if (step.contains("json:")) {
+            try {
+                // 1. 自動清洗標籤，提取路徑（如：data.url）
+                String path = step.replace("[", "").replace("]", "").replace("json:", "").trim();
+                
+                // 2. 預處理：清洗 JSON 裡常見的反斜槓轉義
+                String cleanContent = content.replace("\\/", "/");
+                org.json.JSONObject obj = new org.json.JSONObject(cleanContent);
+                
+                // 3. 處理點號嵌套邏輯
+                if (path.contains(".")) {
+                    String[] keys = path.split("\\.");
+                    Object current = obj;
+                    for (int i = 0; i < keys.length; i++) {
+                        if (i == keys.length - 1) {
+                            // 最後一層，取值返回
+                            return ((org.json.JSONObject) current).optString(keys[i], "");
+                        } else {
+                            // 中間層，繼續深入
+                            current = ((org.json.JSONObject) current).optJSONObject(keys[i]);
+                            if (current == null) return ""; // 路徑斷裂則返回空
+                        }
+                    }
+                }
+                // 4. 普通單層提取
+                return obj.optString(path, "");
+            } catch (Exception e) {
+                // 5. 暴力保底：如果解析失敗，用正則摳出最後一個鍵名的值
+                String rawPath = step.replace("[", "").replace("]", "").replace("json:", "").trim();
+                String keyName = rawPath.contains(".") ? rawPath.substring(rawPath.lastIndexOf(".") + 1) : rawPath;
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"" + keyName + "\"\\s*:\\s*\"(.*?)\"").matcher(content);
+                return m.find() ? m.group(1).replace("\\/", "/") : "";
+            }
         }
-    }
 
         if (step.equalsIgnoreCase("[base64]")) {
             try { return new String(Base64.decode(content, Base64.DEFAULT)); } catch (Exception e) { return content; }
