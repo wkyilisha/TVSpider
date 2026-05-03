@@ -12,6 +12,7 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import java.net.URLEncoder;
+import java.net.UnsupportedEncodingException;
 import java.util.*;
 
 public class KG extends Spider {
@@ -89,48 +90,47 @@ public class KG extends Spider {
             String method = rule.optString("cate_method", "get").toLowerCase();
             String url = (pg.equals("1") && rule.has("cate_page_1") ? rule.optString("cate_page_1") : rule.optString("cate_url"));
             String body = rule.optString("cate_body", "");
-            // --- 🚀 凱哥特製：篩選變量動態替換 (放在 smartRequest 之前) ---
-            String[] filterKeys = {"area", "class", "year", "by", "lang", "letter"};
-            for (String key : filterKeys) {
-                String val = (e != null && e.containsKey(key)) ? e.get(key) : "";
-                String placeholder = "{" + key + "}";
-                // GET 模式下替換 URL 並編碼
-                url = url.replace(placeholder, URLEncoder.encode(val, "UTF-8"));
-                // POST 模式下替換 Body 原始值
-               if (!TextUtils.isEmpty(body)) body = body.replace(placeholder, val);
+
+            // 1. 確定最終 TID (處理電視劇子類篩選覆蓋)
+            String rTid = tid;
+            if (e != null) {
+                if (e.containsKey("tid")) rTid = e.get("tid");
+                else if (e.containsKey("type_id")) rTid = e.get("type_id");
             }
 
-            // 2. 處理變量替換與編碼 (POST 傳原始值，GET 傳編碼值)
-            if (method.equals("post")) {
-                // POST 模式：直接替換原始變量，防止二次編碼
-                url = url.replace("{tid}", tid).replace("{pg}", pg);
-                body = body.replace("{tid}", tid).replace("{pg}", pg);
-            } else {
-                // GET 模式：對變量進行手動編碼拼接 URL
-                String eTid = URLEncoder.encode(tid, "UTF-8");
-                String ePg = URLEncoder.encode(pg, "UTF-8");
-                url = url.replace("{tid}", eTid).replace("{pg}", ePg);
+            // 2. 處理基礎變量與篩選變量替換
+            url = url.replace("{tid}", URLEncoder.encode(rTid, "UTF-8")).replace("{pg}", pg);
+            if (!TextUtils.isEmpty(body)) body = body.replace("{tid}", rTid).replace("{pg}", pg);
+
+            String[] filterKeys = {"area", "class", "year", "by", "lang", "letter", "字母"};
+            for (String key : filterKeys) {
+                String val = (e != null && e.containsKey(key)) ? e.get(key) : "";
+                url = url.replace("{" + key + "}", URLEncoder.encode(val, "UTF-8"));
+                if (!TextUtils.isEmpty(body)) body = body.replace("{" + key + "}", val);
             }
 
             if (url.startsWith("/") && !url.startsWith("//")) url = this.siteUrl + url;
-            
-            // 💡 凱哥監控：分類請求日誌
-            Proxy.log("<b style='color:#2ecc71;'>📂 [分類啟動]</b> 方法: " + method.toUpperCase() + " | TID: " + tid);
-            if (method.equals("post")) {
+
+            // 💡 凱哥監控：顯示完整請求鏈接與 POST 參數
+            Proxy.log("<b style='color:#2ecc71;'>📂 [分類啟動]</b> " + url);
+            if (method.equals("post") && !TextUtils.isEmpty(body)) {
                 Proxy.log("<span style='color:#f1c40f;'>[POST參數]</span> " + body);
             }
 
-            // --- 1. 基礎門票 (針對普通網站的 Session) ---
+            // --- 3. 基礎門票 (針對普通網站的 Session) ---
             if (pg.equals("1")) {
                 KaiGeNet.smartRequest(this.siteUrl, "get", this.siteUrl, null, getHeaders(null));
                 try { Thread.sleep(200); } catch (Exception ignored) {}
             }
 
-            // --- 2. 正式發起請求 ---
+            // --- 4. 正式發起請求 ---
             OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
             String html = res.getBody();
 
-            // --- 3. 基礎重試補償 (去掉 ShieldManager 避免報錯) ---
+            // 💡 凱哥監控：顯示返回數據長度
+            Proxy.log("<b style='color:#3498db;'>📊 [數據返回]</b> 長度: " + (html != null ? html.length() : 0));
+
+            // --- 5. 基礎重試補償 ---
             if (res.getCode() != 200 || TextUtils.isEmpty(html) || html.length() < 300) {
                 Proxy.log("<b style='color:#f1c40f;'>⚠️ 內容異常，嘗試二次刷新...</b>");
                 try { Thread.sleep(1000); } catch (Exception ignored) {}
@@ -138,7 +138,7 @@ public class KG extends Spider {
                 html = res.getBody();
             }
 
-            // --- 4. 交給解析器 ---
+            // --- 6. 交給解析器 ---
             logCheck("分類", html, false);
             return parseList(html, pg, false);
         } catch (Exception ex) { 
