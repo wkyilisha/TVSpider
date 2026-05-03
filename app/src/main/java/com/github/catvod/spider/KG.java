@@ -12,7 +12,6 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import java.net.URLEncoder;
-import java.net.UnsupportedEncodingException;
 import java.util.*;
 
 public class KG extends Spider {
