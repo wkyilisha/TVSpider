@@ -122,7 +122,6 @@ public class KG extends Spider {
 
             // --- 1. 基礎門票 (針對普通網站的 Session) ---
             if (pg.equals("1")) {
-                // 這裡保留預訪問，因為很多站點即便沒盾，也需要先過一下首頁才有基本 Cookie
                 KaiGeNet.smartRequest(this.siteUrl, "get", this.siteUrl, null, getHeaders(null));
                 try { Thread.sleep(200); } catch (Exception ignored) {}
             }
@@ -131,24 +130,12 @@ public class KG extends Spider {
             OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
             String html = res.getBody();
 
-            // --- 3. 核心破盾與數據補償邏輯 ---
-            // 這裡我們把「數據太短」和「檢測到盾」合併處理
-            if (res.getCode() == 850 || html.contains("cdndefend") || TextUtils.isEmpty(html) || html.length() < 300) {
-                
-                // A. 先嘗試「方案二」：外包給 ShieldManager 破盾
-                ShieldResult sRes = ShieldManager.crack(this.siteUrl, res.getCode(), html, getHeaders(null));
-                
-                if (sRes.isSuccess()) {
-                    Proxy.log("<b style='color:#2ecc71;'>✅ 破盾成功，正在重載數據...</b>");
-                    res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, sRes.getNewHeaders());
-                } else {
-                    // B. 如果不是盾，只是普通的加載失敗，執行原有的「數據補償」重試
-                    Proxy.log("<b style='color:#f1c40f;'>⚠️ 內容異常且無盾，嘗試二次刷新...</b>");
-                    try { Thread.sleep(1000); } catch (Exception ignored) {}
-                    res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
-                }
-                
-                html = res.getBody(); // 更新 html 內容
+            // --- 3. 基礎重試補償 (去掉 ShieldManager 避免報錯) ---
+            if (res.getCode() != 200 || TextUtils.isEmpty(html) || html.length() < 300) {
+                Proxy.log("<b style='color:#f1c40f;'>⚠️ 內容異常，嘗試二次刷新...</b>");
+                try { Thread.sleep(1000); } catch (Exception ignored) {}
+                res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
+                html = res.getBody();
             }
 
             // --- 4. 交給解析器 ---
