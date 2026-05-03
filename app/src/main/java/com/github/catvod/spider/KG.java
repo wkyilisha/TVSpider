@@ -89,6 +89,16 @@ public class KG extends Spider {
             String method = rule.optString("cate_method", "get").toLowerCase();
             String url = (pg.equals("1") && rule.has("cate_page_1") ? rule.optString("cate_page_1") : rule.optString("cate_url"));
             String body = rule.optString("cate_body", "");
+            // --- 🚀 凱哥特製：篩選變量動態替換 (放在 smartRequest 之前) ---
+            String[] filterKeys = {"area", "class", "year", "by", "lang", "letter"};
+            for (String key : filterKeys) {
+                String val = (e != null && e.containsKey(key)) ? e.get(key) : "";
+                String placeholder = "{" + key + "}";
+                // GET 模式下替換 URL 並編碼
+                url = url.replace(placeholder, URLEncoder.encode(val, "UTF-8"));
+                // POST 模式下替換 Body 原始值
+               if (!TextUtils.isEmpty(body)) body = body.replace(placeholder, val);
+            }
 
             // 2. 處理變量替換與編碼 (POST 傳原始值，GET 傳編碼值)
             if (method.equals("post")) {
