@@ -110,11 +110,20 @@ public class KG extends Spider {
                 Proxy.log("<span style='color:#f1c40f;'>[POST參數]</span> " + body);
             }
 
-            // 3. 🚀 升級：使用 KaiGeNet (將寫死的 "get" 改為動態 method，將 null 改為 body)
+// --- 🚀 凱哥優化版請求：增加自動補償 ---
             OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
-            
-            logCheck("分類", res.getBody(), false);
-            return parseList(res.getBody(), pg, false);
+            String html = res.getBody();
+
+            // 🎯 核心補救：如果內容太短（小於300字），自動重試一次
+            if (TextUtils.isEmpty(html) || html.length() < 300) {
+                Proxy.log("<b style='color:#f1c40f;'>⚠️ [補償機制] 數據異常，嘗試自動刷新...</b>");
+                try { Thread.sleep(1000); } catch (Exception ignored) {}
+                res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
+                html = res.getBody();
+            }
+            // --- 補償結束 ---
+            logCheck("分類", html, false);
+            return parseList(html, pg, false);
         } catch (Exception ex) { 
             Proxy.log("<b style='color:red;'>🚨 [分類異常]:</b> " + ex.getMessage());
             return "{\"list\":[]}"; 
