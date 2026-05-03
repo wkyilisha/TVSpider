@@ -110,28 +110,38 @@ public class KG extends Spider {
                 Proxy.log("<span style='color:#f1c40f;'>[POST參數]</span> " + body);
             }
 
-           // 1. 🚀 凱哥「門票補償」：如果是第一頁，先靜默訪問首頁獲取 Cookie
+            // --- 1. 基礎門票 (針對普通網站的 Session) ---
             if (pg.equals("1")) {
-                Proxy.log("<b style='color:#9b59b6;'>🎫 [獲取門票] 正在預訪問首頁以獲取 Cookie...</b>");
-                // 這裡訪問的是 siteUrl (主頁)，目的是讓底層自動存下 Cookie
+                // 這裡保留預訪問，因為很多站點即便沒盾，也需要先過一下首頁才有基本 Cookie
                 KaiGeNet.smartRequest(this.siteUrl, "get", this.siteUrl, null, getHeaders(null));
-                try { Thread.sleep(300); } catch (Exception ignored) {}
+                try { Thread.sleep(200); } catch (Exception ignored) {}
             }
 
-            // 2. 🚀 正式發起分類請求 (此時請求會自動帶上剛拿到的 Cookie)
+            // --- 2. 正式發起請求 ---
             OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
             String html = res.getBody();
 
-            // 3. 🎯 雙重保障：如果沒拿到數據（小於300字），自動刷新補償一次
-            if (TextUtils.isEmpty(html) || html.length() < 300) {
-                Proxy.log("<b style='color:#f1c40f;'>⚠️ [數據補償] 內容異常，嘗試刷新...</b>");
-                try { Thread.sleep(1000); } catch (Exception ignored) {}
-                // 重新發起請求，並覆蓋 html 變量
-                res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
-                html = res.getBody();
+            // --- 3. 核心破盾與數據補償邏輯 ---
+            // 這裡我們把「數據太短」和「檢測到盾」合併處理
+            if (res.getCode() == 850 || html.contains("cdndefend") || TextUtils.isEmpty(html) || html.length() < 300) {
+                
+                // A. 先嘗試「方案二」：外包給 ShieldManager 破盾
+                ShieldResult sRes = ShieldManager.crack(this.siteUrl, res.getCode(), html, getHeaders(null));
+                
+                if (sRes.isSuccess()) {
+                    Proxy.log("<b style='color:#2ecc71;'>✅ 破盾成功，正在重載數據...</b>");
+                    res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, sRes.getNewHeaders());
+                } else {
+                    // B. 如果不是盾，只是普通的加載失敗，執行原有的「數據補償」重試
+                    Proxy.log("<b style='color:#f1c40f;'>⚠️ 內容異常且無盾，嘗試二次刷新...</b>");
+                    try { Thread.sleep(1000); } catch (Exception ignored) {}
+                    res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
+                }
+                
+                html = res.getBody(); // 更新 html 內容
             }
 
-            // 4. ✅ 最後交給解析器 (確保使用的是 html 變量)
+            // --- 4. 交給解析器 ---
             logCheck("分類", html, false);
             return parseList(html, pg, false);
         } catch (Exception ex) { 
