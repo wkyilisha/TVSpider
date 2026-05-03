@@ -110,18 +110,28 @@ public class KG extends Spider {
                 Proxy.log("<span style='color:#f1c40f;'>[POST參數]</span> " + body);
             }
 
-// --- 🚀 凱哥優化版請求：增加自動補償 ---
+           // 1. 🚀 凱哥「門票補償」：如果是第一頁，先靜默訪問首頁獲取 Cookie
+            if (pg.equals("1")) {
+                Proxy.log("<b style='color:#9b59b6;'>🎫 [獲取門票] 正在預訪問首頁以獲取 Cookie...</b>");
+                // 這裡訪問的是 siteUrl (主頁)，目的是讓底層自動存下 Cookie
+                KaiGeNet.smartRequest(this.siteUrl, "get", this.siteUrl, null, getHeaders(null));
+                try { Thread.sleep(300); } catch (Exception ignored) {}
+            }
+
+            // 2. 🚀 正式發起分類請求 (此時請求會自動帶上剛拿到的 Cookie)
             OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
             String html = res.getBody();
 
-            // 🎯 核心補救：如果內容太短（小於300字），自動重試一次
+            // 3. 🎯 雙重保障：如果沒拿到數據（小於300字），自動刷新補償一次
             if (TextUtils.isEmpty(html) || html.length() < 300) {
-                Proxy.log("<b style='color:#f1c40f;'>⚠️ [補償機制] 數據異常，嘗試自動刷新...</b>");
+                Proxy.log("<b style='color:#f1c40f;'>⚠️ [數據補償] 內容異常，嘗試刷新...</b>");
                 try { Thread.sleep(1000); } catch (Exception ignored) {}
+                // 重新發起請求，並覆蓋 html 變量
                 res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
                 html = res.getBody();
             }
-            // --- 補償結束 ---
+
+            // 4. ✅ 最後交給解析器 (確保使用的是 html 變量)
             logCheck("分類", html, false);
             return parseList(html, pg, false);
         } catch (Exception ex) { 
