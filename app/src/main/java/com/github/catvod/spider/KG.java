@@ -332,12 +332,21 @@ public class KG extends Spider {
             int stepCount = (steps != null ? steps.length() : 0);
             boolean finalStepSuccess = false;
 
-            if (stepCount == 0) {
+if (stepCount == 0) {
                 boolean isStream = originalUrl.toLowerCase().contains(".m3u8") || originalUrl.toLowerCase().contains(".mp4");
                 JSONObject res = new JSONObject();
                 res.put("parse", isStream ? 0 : 1);
                 res.put("url", originalUrl);
                 res.put("header", getPlayHeaders(play));
+                
+                // 🚀 凱哥加入：無步驟時的彈幕推送
+                try {
+                    String danmakuUrl = getProxyUrl() + "&do=danmu" 
+                                    + "&title=" + URLEncoder.encode(mVideoName, "UTF-8") 
+                                    + "&episode=" + URLEncoder.encode(originalUrl, "UTF-8");
+                    res.put("danmaku", danmakuUrl);
+                } catch (Exception ignored) {}
+
                 Proxy.log("<b style='color:#2ecc71;'>🚀 [Direct] 無解析步驟，直接推送原始地址</b>");
                 return res.toString();
             }
@@ -373,7 +382,7 @@ public class KG extends Spider {
 
             // 2. 繼續執行變量提取
             JSONObject vars = step.optJSONObject("vars");
-if (vars != null) {
+            if (vars != null) {
                     boolean currentStepAnyOk = false;
                     for (Iterator<String> it = vars.keys(); it.hasNext(); ) {
                         String k = it.next();
@@ -423,8 +432,17 @@ if (vars != null) {
 
             JSONObject resJson = new JSONObject();
             resJson.put("parse", pValue);
-            resJson.put("url", (pValue == 0) ? finalUrl : originalUrl);
+            String urlToPush = (pValue == 0) ? finalUrl : originalUrl;
+            resJson.put("url", urlToPush);
             resJson.put("header", getPlayHeaders(play));
+            
+            // 🚀 凱哥加入：解析完成後的彈幕推送
+            try {
+                String danmakuUrl = getProxyUrl() + "&do=danmu" 
+                                + "&title=" + URLEncoder.encode(mVideoName, "UTF-8") 
+                                + "&episode=" + URLEncoder.encode(id, "UTF-8"); // 這裡用 id 更準確
+                resJson.put("danmaku", danmakuUrl);
+            } catch (Exception ignored) {}
             
             // 🚀 最終推送 JSON 日誌
             String finalPush = resJson.toString();
