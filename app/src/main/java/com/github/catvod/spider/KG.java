@@ -18,13 +18,7 @@ public class KG extends Spider {
     private String siteUrl = ""; 
     private JSONObject rule = new JSONObject();
     private Map<String, String> varPool = new HashMap<>();
-// 🚀 [就是在這裏添加！] ---------------------------------------
-    private String mVideoName = ""; 
 
-    private String getProxyUrl() {
-        // 這裡做個小優化，調用底層 Proxy 獲取本地代理地址
-        return Proxy.getUrl() + "?do=danmu"; 
-    }
     private void logger(String msg) {
         try {
             Proxy.log(msg);
@@ -233,9 +227,8 @@ public class KG extends Spider {
             
             // 策略：如果規則有寫就用規則，規則沒寫或抓不到就用大腦智慧識別
             String name = extract(doc, rule.optString("dt_name"));
-            String finalName = TextUtils.isEmpty(name) ? smartVod.optString("vod_name") : name; // 先定義好
-            vod.put("vod_name", finalName);
-            this.mVideoName = finalName; // 這樣就完美解決了 symbol 找不到的問題
+            vod.put("vod_name", TextUtils.isEmpty(name) ? smartVod.optString("vod_name") : name);
+            
             String pic = extract(doc, rule.optString("dt_pic"));
             vod.put("vod_pic", TextUtils.isEmpty(pic) ? smartVod.optString("vod_pic") : pic);
             
@@ -339,21 +332,12 @@ public class KG extends Spider {
             int stepCount = (steps != null ? steps.length() : 0);
             boolean finalStepSuccess = false;
 
-if (stepCount == 0) {
+            if (stepCount == 0) {
                 boolean isStream = originalUrl.toLowerCase().contains(".m3u8") || originalUrl.toLowerCase().contains(".mp4");
                 JSONObject res = new JSONObject();
                 res.put("parse", isStream ? 0 : 1);
                 res.put("url", originalUrl);
                 res.put("header", getPlayHeaders(play));
-                
-                // 🚀 凱哥加入：無步驟時的彈幕推送
-                try {
-                    String danmakuUrl = getProxyUrl() + "&do=danmu" 
-                                    + "&title=" + URLEncoder.encode(mVideoName, "UTF-8") 
-                                    + "&episode=" + URLEncoder.encode(originalUrl, "UTF-8");
-                    res.put("danmaku", danmakuUrl);
-                } catch (Exception ignored) {}
-
                 Proxy.log("<b style='color:#2ecc71;'>🚀 [Direct] 無解析步驟，直接推送原始地址</b>");
                 return res.toString();
             }
@@ -389,7 +373,7 @@ if (stepCount == 0) {
 
             // 2. 繼續執行變量提取
             JSONObject vars = step.optJSONObject("vars");
-            if (vars != null) {
+if (vars != null) {
                     boolean currentStepAnyOk = false;
                     for (Iterator<String> it = vars.keys(); it.hasNext(); ) {
                         String k = it.next();
@@ -439,17 +423,8 @@ if (stepCount == 0) {
 
             JSONObject resJson = new JSONObject();
             resJson.put("parse", pValue);
-            String urlToPush = (pValue == 0) ? finalUrl : originalUrl;
-            resJson.put("url", urlToPush);
+            resJson.put("url", (pValue == 0) ? finalUrl : originalUrl);
             resJson.put("header", getPlayHeaders(play));
-            
-            // 🚀 凱哥加入：解析完成後的彈幕推送
-            try {
-                String danmakuUrl = getProxyUrl() + "&do=danmu" 
-                                + "&title=" + URLEncoder.encode(mVideoName, "UTF-8") 
-                                + "&episode=" + URLEncoder.encode(id, "UTF-8"); // 這裡用 id 更準確
-                resJson.put("danmaku", danmakuUrl);
-            } catch (Exception ignored) {}
             
             // 🚀 最終推送 JSON 日誌
             String finalPush = resJson.toString();
