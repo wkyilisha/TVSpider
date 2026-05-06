@@ -18,7 +18,13 @@ public class KG extends Spider {
     private String siteUrl = ""; 
     private JSONObject rule = new JSONObject();
     private Map<String, String> varPool = new HashMap<>();
+// 🚀 [就是在這裏添加！] ---------------------------------------
+    private String mVideoName = ""; 
 
+    private String getProxyUrl() {
+        // 這裡做個小優化，調用底層 Proxy 獲取本地代理地址
+        return Proxy.getUrl() + "?do=danmu"; 
+    }
     private void logger(String msg) {
         try {
             Proxy.log(msg);
@@ -227,8 +233,9 @@ public class KG extends Spider {
             
             // 策略：如果規則有寫就用規則，規則沒寫或抓不到就用大腦智慧識別
             String name = extract(doc, rule.optString("dt_name"));
-            vod.put("vod_name", TextUtils.isEmpty(name) ? smartVod.optString("vod_name") : name);
-            
+            String finalName = TextUtils.isEmpty(name) ? smartVod.optString("vod_name") : name; // 先定義好
+            vod.put("vod_name", finalName);
+            this.mVideoName = finalName; // 這樣就完美解決了 symbol 找不到的問題
             String pic = extract(doc, rule.optString("dt_pic"));
             vod.put("vod_pic", TextUtils.isEmpty(pic) ? smartVod.optString("vod_pic") : pic);
             
