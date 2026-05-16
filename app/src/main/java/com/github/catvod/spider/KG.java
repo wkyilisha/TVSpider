@@ -321,6 +321,7 @@ if (html != null && html.trim().startsWith("{")) {
             if (!TextUtils.isEmpty(playUrl)) {
                 String[] episodes = playUrl.split("#");
                 varPool.put("vod_total_episode", String.valueOf(episodes.length));
+                varPool.put("vod_play_url", playUrl);
             }
             return new JSONObject().put("list", new JSONArray().put(vod)).toString();
         }
@@ -373,6 +374,7 @@ Document doc = Jsoup.parse(html);
             if (!TextUtils.isEmpty(playUrl)) {
                 String[] episodes = playUrl.split("#");
                 varPool.put("vod_total_episode", String.valueOf(episodes.length));
+                varPool.put("vod_play_url", playUrl);
             }
             return new JSONObject().put("list", new JSONArray().put(vod)).toString();
         } catch (Exception e) { 
@@ -449,11 +451,16 @@ Document doc = Jsoup.parse(html);
             // 🎬 啟動日誌
             Proxy.log("<b style='color:#e74c3c;'>🎬 [播放解析啟動]</b> 原始ID: " + originalUrl);
 
+            // ✅ 备份弹幕数据（必须在 clear 之前！）
+            String danmuTitle = varPool.get("vod_name");
+            String danmuPlayUrl = varPool.get("vod_play_url");
+
+            varPool.clear();
+
             // ✅ 从播放链接反查集数（弹幕需要）
-            String playUrl = varPool.get("vod_play_url");
             String currentEpisode = "1";
-            if (!TextUtils.isEmpty(playUrl)) {
-                String[] episodes = playUrl.split("#");
+            if (!TextUtils.isEmpty(danmuPlayUrl)) {
+                String[] episodes = danmuPlayUrl.split("#");
                 for (int i = 0; i < episodes.length; i++) {
                     if (episodes[i].contains(id)) {
                         String epName = episodes[i].split("\\$")[0];
@@ -463,10 +470,11 @@ Document doc = Jsoup.parse(html);
                     }
                 }
             }
+
+            // ✅ 恢复弹幕数据到 varPool
+            if (!TextUtils.isEmpty(danmuTitle)) varPool.put("vod_name", danmuTitle);
             varPool.put("vod_episode", currentEpisode);
             Proxy.log("<span style='color:#9b59b6;'>[弹幕] 标题=" + varPool.get("vod_name") + ", 集数=" + currentEpisode + "</span>");
-
-            varPool.clear();
             varPool.put("play_id", originalUrl);
             varPool.put("final_url", originalUrl); 
 
