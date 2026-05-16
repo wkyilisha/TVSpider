@@ -52,7 +52,7 @@ public class DanmuHelper {
             int episodeNum = 1;
             if (episodeStr != null) {
                 try {
-                    episodeNum = Integer.parseInt(episodeStr.replaceAll("\D", ""));
+                    episodeNum = Integer.parseInt(episodeStr.replaceAll("\\D", ""));
                 } catch (Exception ignored) {}
             }
 
@@ -131,7 +131,7 @@ public class DanmuHelper {
      * 去掉 URL 参数
      */
     private static String cleanUrl(String url) {
-        return url.contains("?") ? url.split("\?")[0] : url;
+        return url.contains("?") ? url.split("\\?")[0] : url;
     }
 
     /**
