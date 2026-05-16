@@ -115,7 +115,7 @@ private void logCheck(String title, String html, boolean showSource) {
                     hdrs.put("Cookie", TextUtils.isEmpty(existCookie) ? redirectCookie : existCookie + "; " + redirectCookie);
                     rule.put("headers", hdrs);
                     // ✅ 同时写入 cookieJar，后续所有 smartRequest 自动携带
-                    KaiGeNet.putCookie(this.siteUrl, redirectCookie);
+                    // KaiGeNet.putCookie not available
                     logger("<span style='color:#2ecc71;'>🍪 [302Token] cookie成功: </span>" + redirectCookie);
                 }
                 // 带cookie预热一次，处理CDN盾
@@ -656,7 +656,12 @@ private String parseList(String html, String pg, boolean isSearch) {
             if (array == null) array = json.optJSONArray("list");
             if (array != null) {
                 for (int i = 0; i < array.length(); i++) {
-                    JSONObject vod = KaiGeSmart.parseListItem(array.getJSONObject(i));
+                    JSONObject item = array.getJSONObject(i);
+                    JSONObject vod = new JSONObject();
+                    vod.put("vod_id", item.optString("vod_id", item.optString("id", "")));
+                    vod.put("vod_name", item.optString("vod_name", item.optString("name", "")));
+                    vod.put("vod_pic", item.optString("vod_pic", item.optString("pic", "")));
+                    vod.put("vod_remarks", item.optString("vod_remarks", item.optString("remarks", "")));
                     if (!vod.has("vod_id")) continue;
 
                     String vId = vod.optString("vod_id");
@@ -829,7 +834,6 @@ public String homeContent(boolean filter) {
     }
 
     // ✅ 新增：弹幕入口方法，FongMi 框架播放时会调用
-    @Override
     public String danmaku(String url) throws Exception {
         // 从当前视频的详情中提取 title 和 episode
         // 这里假设 URL 格式中包含 vod_id，你需要根据实际站点调整解析逻辑
