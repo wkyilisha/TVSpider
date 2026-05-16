@@ -314,4 +314,21 @@ public static String buildResult(String data, String key) {
         }
         return node.text().replaceAll(key + "[:：]", "").trim();
     }
+public static JSONObject parseListItem(JSONObject item) {
+        JSONObject vod = new JSONObject();
+        try {
+            String vodId      = item.optString("vod_id",      item.optString("id",      ""));
+            String vodName    = item.optString("vod_name",    item.optString("name",    ""));
+            String vodPic     = item.optString("vod_pic",     item.optString("pic",     ""));
+            String vodRemarks = item.optString("vod_remarks", item.optString("remarks", ""));
+
+            if (TextUtils.isEmpty(vodId) || TextUtils.isEmpty(vodName)) return vod;
+
+            vod.put("vod_id",      vodId);
+            vod.put("vod_name",    vodName);
+            vod.put("vod_pic",     fixUrl(vodPic));
+            vod.put("vod_remarks", vodRemarks);
+        } catch (Exception ignored) {}
+        return vod;
+    }
 }
