@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class KaiGeNet {
 
-    // 🚀 Cookie 緩存：解決「二次請求」和「登錄狀態」的核心
+    // 🚀 Cookie 緩存：解決「二次請求」和「登錄狀態」核心
     private static final Map<String, String> cookieJar = new ConcurrentHashMap<>();
     private static final String MOBILE_UA = "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.178 Mobile Safari/537.36";
 
@@ -23,19 +23,18 @@ public class KaiGeNet {
      * @param body 請求參數
      * @param headers 自定義頭
      */
-    public static OkResult smartRequest(String siteUrl, String method, String url, String body, Map<String, String> headers) {
+public static OkResult smartRequest(String siteUrl, String method, String url, String body, Map<String, String> headers) {
         String host = getHost(url);
         if (headers == null) headers = new HashMap<>();
 
         // 1. 注入萬用 UA
         if (!headers.containsKey("User-Agent")) headers.put("User-Agent", MOBILE_UA);
 
-        // 2. 🚀 凱哥防護：注入安全 Referer (過濾非 ASCII 字符，防止中文路徑崩潰)
+        // 2. 🚀 凱哥防護：注入安全 Referer
         if (!headers.containsKey("Referer")) {
             if (!TextUtils.isEmpty(siteUrl) && siteUrl.matches("^[\\x00-\\x7F]*$")) {
                 headers.put("Referer", siteUrl);
             } else {
-                // 如果路徑有中文，則降級使用該站點的 Host 域名
                 headers.put("Referer", getHost(siteUrl) + "/");
             }
         }
@@ -45,30 +44,35 @@ public class KaiGeNet {
             headers.put("Cookie", cookieJar.get(host));
         }
 
-        // 4. 執行第一次請求
+        // 4. 執行正式請求
         OkResult res = execute(method, url, body, headers);
 
-        // 5. 🚀 核心提取：從響應頭拿到新的 Set-Cookie
+        // 5. 提取Set-Cookie更新cookieJar
         String setCookie = getSetCookie(res.getResp());
-
         if (!TextUtils.isEmpty(setCookie)) {
-            cookieJar.put(host, setCookie);
-            
-            // 🚀 凱哥特技：自動補刀 (解決 5s 盾、防火牆或 Cookie 驗證頁面)
-            // 如果返回內容太短，說明還沒進到正題，帶著新 Cookie 立刻再請求一次
-            if (res.getBody().trim().length() < 1000) {
-                headers.put("Cookie", setCookie);
-                res = execute(method, url, body, headers);
-                
-                // 二次請求後再次同步最新 Cookie
-                String secondCookie = getSetCookie(res.getResp());
-                if (!TextUtils.isEmpty(secondCookie)) cookieJar.put(host, secondCookie);
+            String existCookie = cookieJar.getOrDefault(host, "");
+            String mergedCookie = mergeCookies(existCookie, setCookie);
+            cookieJar.put(host, mergedCookie);
+
+            // CDN盾JS计算
+            String bodyStr = res.getBody() == null ? "" : res.getBody().trim();
+            if (bodyStr.contains("cdndefend_js_cookie")) {
+                String jsCookie = cdnDefendCookie(bodyStr);
+                if (!TextUtils.isEmpty(jsCookie)) {
+                    mergedCookie = mergeCookies(mergedCookie, jsCookie);
+                    cookieJar.put(host, mergedCookie);
+                    headers.put("Cookie", mergedCookie);
+                    res = execute(method, url, body, headers);
+                    String thirdCookie = getSetCookie(res.getResp());
+                    if (!TextUtils.isEmpty(thirdCookie)) {
+                        cookieJar.put(host, mergeCookies(mergedCookie, thirdCookie));
+                    }
+                }
             }
         }
 
         return res;
     }
-
     // 🚀 內部執行器：支持 POST(JSON/表單) 和 GET 參數自動轉換
     private static OkResult execute(String method, String url, String body, Map<String, String> headers) {
         method = (method == null) ? "get" : method.toLowerCase();
@@ -123,5 +127,60 @@ public class KaiGeNet {
             }
         } catch (Exception ignored) {}
         return map;
+    }
+    // ✅ 合并Cookie：避免新cookie覆盖旧cookie，相同key取新值
+    private static String mergeCookies(String oldCookie, String newCookie) {
+        if (TextUtils.isEmpty(oldCookie)) return newCookie;
+        if (TextUtils.isEmpty(newCookie)) return oldCookie;
+        Map<String, String> cookieMap = new java.util.LinkedHashMap<>();
+        // 先放旧的
+        for (String part : oldCookie.split(";")) {
+            String[] kv = part.trim().split("=", 2);
+            if (kv.length == 2) cookieMap.put(kv[0].trim(), kv[1].trim());
+        }
+        // 新的覆盖旧的（相同key取新值）
+        for (String part : newCookie.split(";")) {
+            String[] kv = part.trim().split("=", 2);
+            if (kv.length == 2) cookieMap.put(kv[0].trim(), kv[1].trim());
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> entry : cookieMap.entrySet()) {
+            if (sb.length() > 0) sb.append("; ");
+            sb.append(entry.getKey()).append("=").append(entry.getValue());
+        }
+        return sb.toString();
+    }
+    // ✅ 外部写入cookie到cookieJar
+    public static void putCookie(String url, String cookie) {
+        String host = getHost(url);
+        if (!TextUtils.isEmpty(host) && !TextUtils.isEmpty(cookie)) {
+            String existing = cookieJar.getOrDefault(host, "");
+            cookieJar.put(host, mergeCookies(existing, cookie));
+        }
+    }
+    // ✅ CDN盾验证：自动计算 cdndefend_js_cookie
+    public static String cdnDefendCookie(String html) {
+        try {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("const a0_0x2a54=\\['([A-F0-9]+)'")
+                .matcher(html);
+            if (!m.find()) return "";
+            String c = m.group(1);
+            int n1 = Integer.parseInt(String.valueOf(c.charAt(0)), 16);
+            for (int i = 0; i < 99999; i++) {
+                byte[] sha1 = sha1Bytes(c + i);
+                if (sha1 != null && (sha1[n1] & 0xFF) == 0xb0 && (sha1[n1 + 1] & 0xFF) == 0x0b) {
+                    return "cdndefend_js_cookie=" + c + i;
+                }
+            }
+        } catch (Exception e) {}
+        return "";
+    }
+
+    private static byte[] sha1Bytes(String input) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-1");
+            return md.digest(input.getBytes("UTF-8"));
+        } catch (Exception e) { return null; }
     }
 }
