@@ -11,6 +11,7 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import java.util.List;
 import java.net.URLEncoder;
 import java.util.*;
 
@@ -25,17 +26,18 @@ public class KG extends Spider {
         } catch (Exception ignored) {}
     }
 
-    private void logCheck(String title, String html, boolean showSource) {
+private void logCheck(String title, String html, boolean showSource) {
         if (TextUtils.isEmpty(html)) {
-            logger("❌ [" + title + "] 請求失敗");
+            // 💡 显式报警：这里表示 OkHttp 根本没拿到任何数据
+            logger("🚨 [网络请求失败] " + title + " 返回内容为空！请检查 UA、Referer 或网站是否开启了 CC 防护");
             return;
         }
         int len = html.length();
-        logger("📥 [" + title + "] 成功 | " + len + " 字符");
+        logger("📥 [" + title + "] 请求成功 | 收到 " + len + " 字符");
         if (showSource) {
             String preview = (len > 500 ? html.substring(0, 500) : html)
                 .trim().replace("\n", " ").replace("\r", " ");
-            logger("📄 [源碼預覽]: " + preview.replace("<", "&lt;").replace(">", "&gt;") + "...");
+            logger("📄 [源码预览]: " + preview.replace("<", "&lt;").replace(">", "&gt;") + "...");
         }
     }
 
@@ -44,7 +46,7 @@ public class KG extends Spider {
         try {
             logger("------------------------------------------");
             logger("🚀❤️ <b>凱哥全能獨立引擎啟動 (Full Power)...</b>");
-            
+
             if (TextUtils.isEmpty(extend)) {
                 logger("🚨 [系統] 初始化失敗: 配置路徑為空");
                 return;
@@ -52,10 +54,10 @@ public class KG extends Spider {
 
             String json;
             if (extend.startsWith("http")) {
-                // 🚀 關鍵修復：手動過濾掉可能包含中文的 Referer 隱患
+                // 🚀 關鍵修復：手動過濾掉可能包含中文Referer 隱患
                 Map<String, String> initHeaders = new HashMap<>();
                 initHeaders.put("Referer", ""); // 清空 Referer，防止 OkHttp 報錯
-                
+
                 // 使用最原始的 OkHttp 請求，避免被 smartRequest 裡的自動 Header 帶偏
                 OkResult res = OkHttp.get(extend, null, initHeaders);
                 json = res.getBody();
@@ -74,7 +76,55 @@ public class KG extends Spider {
 
             logger("✅ [系統] 站點配置加載完成: " + rule.optString("site_name"));
             logger("🌐 [系統] 域名自動綁定: " + this.siteUrl);
-            
+
+            // ✅ 预热首页：手动处理302拿cookie，只做一次
+            try {
+                Map<String, List<String>> redirectHeaders = OkHttp.getLocationHeader(
+                    this.siteUrl, getHeaders(null));
+                // ✅ 安全检测：如果跳转目标不是同域名则拒绝
+                String location = OkHttp.getLocation(redirectHeaders);
+                if (!TextUtils.isEmpty(location)) {
+                    String locationHost = "";
+                    try { locationHost = new java.net.URL(location).getHost(); } catch (Exception ignored) {}
+                    String siteHost = "";
+                    try { siteHost = new java.net.URL(this.siteUrl).getHost(); } catch (Exception ignored) {}
+                    if (!locationHost.equals(siteHost)) {
+                        logger("<span style='color:#f1c40f;'>⚠️ [预热] 跨域跳转已拒绝: </span>" + location);
+                        throw new Exception("cross domain redirect blocked");
+                    }
+                }
+                String redirectCookie = "";
+                if (redirectHeaders != null) {
+                    List<String> cookies = redirectHeaders.get("Set-Cookie");
+                    if (cookies == null) cookies = redirectHeaders.get("set-cookie");
+                    if (cookies != null && !cookies.isEmpty()) {
+                        StringBuilder sb = new StringBuilder();
+                        for (String c : cookies) {
+                            String part = c.split(";")[0].trim();
+                            if (sb.length() > 0) sb.append("; ");
+                            sb.append(part);
+                        }
+                        redirectCookie = sb.toString();
+                    }
+                }
+                if (!TextUtils.isEmpty(redirectCookie)) {
+                    // ✅ 同时存入 rule.headers 和 KaiGeNet.cookieJar，确保所有请求都带上
+                    JSONObject hdrs = rule.optJSONObject("headers");
+                    if (hdrs == null) hdrs = new JSONObject();
+                    String existCookie = hdrs.optString("Cookie", "");
+                    hdrs.put("Cookie", TextUtils.isEmpty(existCookie) ? redirectCookie : existCookie + "; " + redirectCookie);
+                    rule.put("headers", hdrs);
+                    // ✅ 同时写入 cookieJar，后续所有 smartRequest 自动携带
+                    KaiGeNet.putCookie(this.siteUrl, redirectCookie);
+                    logger("<span style='color:#2ecc71;'>🍪 [302Token] cookie成功: </span>" + redirectCookie);
+                }
+                // 带cookie预热一次，处理CDN盾
+                KaiGeNet.smartRequest(this.siteUrl, "get", this.siteUrl, null, getHeaders(null));
+                logger("<span style='color:#2ecc71;'>🍪 [首页预热] 完成</span>");
+            } catch (Exception ex) {
+                logger("<span style='color:#f1c40f;'>⚠️ [首页预热] 异常: </span>" + ex.getMessage());
+            }
+
         } catch (Exception e) {
             // 這裡會捕獲到 Unexpected char 報錯並顯示
             logger("🚨 [系統] 初始化崩潰: " + e.getMessage());
@@ -126,6 +176,23 @@ public class KG extends Spider {
             OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
             String html = res.getBody();
 
+            // 🚀 [修正位置的診斷日誌]
+            if (TextUtils.isEmpty(html)) {
+                Proxy.log("<b style='color:red;'>🚨 [網絡層錯誤] 請求返回為 0 字節！請檢查 Referer 或 UA。</b>");
+            } else {
+                Proxy.log("<b style='color:#2ecc71;'>📥 [網絡層成功] 收到源碼: " + html.length() + " 字節</b>");
+
+                // 先解析出 items，再进行逻辑判断
+                String itemRule = rule.optString("cate_item");
+                Document doc = Jsoup.parse(html);
+                Elements items = doc.select(itemRule); // 👈 必须先定义 items
+
+                if (!items.isEmpty()) { 
+                    Proxy.log("<b style='color:#2ecc71;'>✅ [定位層成功] 匹配到項目数量: " + items.size() + "</b>");
+                } else {
+                    Proxy.log("<b style='color:red;'>❌ [定位層錯誤] 規則 [" + itemRule + "] 找不到內容，請修改 cate_item！</b>");
+                }
+            }
             // 💡 凱哥監控：顯示返回數據長度
             Proxy.log("<b style='color:#3498db;'>📊 [數據返回]</b> 長度: " + (html != null ? html.length() : 0));
 
@@ -176,7 +243,7 @@ public class KG extends Spider {
 
             // 3. 🚀 關鍵修復：將寫死的 "get" 改為動態 method，將 null 改為 body
             OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, url, body, getHeaders(null));
-            
+
             logCheck("搜索", res.getBody(), false);
             return parseList(res.getBody(), "1", true);
         } catch (Exception e) { 
@@ -189,7 +256,7 @@ public class KG extends Spider {
     public String detailContent(List<String> ids) {
         try {
             String id = ids.get(0);
-            
+
             // 1. 動態讀取詳情配置
             String method = rule.optString("detail_method", "get").toLowerCase();
             String url = id.startsWith("http") ? id : this.siteUrl + (id.startsWith("/") ? "" : "/") + id;
@@ -216,30 +283,56 @@ public class KG extends Spider {
             String html = res.getBody();
             logCheck("詳情", html, false);
 
-            Document doc = Jsoup.parse(html);
-            
+// ✅ 新增：如果详情接口返回的是苹果CMS标准JSON，直接解析
+if (html != null && html.trim().startsWith("{")) {
+    try {
+        JSONObject json = new JSONObject(html.trim());
+        JSONArray dataList = json.optJSONArray("list");
+        if (dataList != null && dataList.length() > 0) {
+            JSONObject item = dataList.getJSONObject(0);
+            JSONObject vod = new JSONObject();
+            vod.put("vod_id",       ids.get(0));
+            vod.put("vod_name",     item.optString("vod_name",     item.optString("name",     "")));
+            vod.put("vod_pic",      item.optString("vod_pic",      item.optString("pic",      "")));
+            vod.put("vod_remarks",  item.optString("vod_remarks",  item.optString("remarks",  "")));
+            vod.put("vod_actor",    item.optString("vod_actor",    item.optString("actor",    "")));
+            vod.put("vod_director", item.optString("vod_director", item.optString("director", "")));
+            vod.put("vod_content",  item.optString("vod_content",  item.optString("content",  "")));
+            vod.put("vod_play_from",item.optString("vod_play_from",""));
+            vod.put("vod_play_url", item.optString("vod_play_url", ""));
+            Proxy.log("<b style='color:#2ecc71;'>✅ [详情] JSON直解成功: </b>" + vod.optString("vod_name"));
+            return new JSONObject().put("list", new JSONArray().put(vod)).toString();
+        }
+    } catch (Exception ex) {
+        Proxy.log("<b style='color:red;'>❌ [详情] JSON解析失败: </b>" + ex.getMessage());
+    }
+}
+
+// 原有HTML解析逻辑继续往下走
+Document doc = Jsoup.parse(html);
+
             // 🚀 升級：智慧保底模式
             // 首先嘗試用 KaiGeSmart 掃描全圖
             JSONObject smartVod = KaiGeSmart.parseDetail(html);
-            
+
             JSONObject vod = new JSONObject();
             vod.put("vod_id", id);
-            
+
             // 策略：如果規則有寫就用規則，規則沒寫或抓不到就用大腦智慧識別
             String name = extract(doc, rule.optString("dt_name"));
             vod.put("vod_name", TextUtils.isEmpty(name) ? smartVod.optString("vod_name") : name);
-            
+
             String pic = extract(doc, rule.optString("dt_pic"));
             vod.put("vod_pic", TextUtils.isEmpty(pic) ? smartVod.optString("vod_pic") : pic);
-            
+
             vod.put("vod_remarks", extract(doc, rule.optString("dt_remarks")));
-            
+
             String actor = extract(doc, rule.optString("dt_actor"));
             vod.put("vod_actor", TextUtils.isEmpty(actor) ? smartVod.optString("vod_actor") : actor);
-            
+
             String director = extract(doc, rule.optString("dt_director"));
             vod.put("vod_director", TextUtils.isEmpty(director) ? smartVod.optString("vod_director") : director);
-            
+
             String content = extract(doc, rule.optString("dt_content"));
             vod.put("vod_content", TextUtils.isEmpty(content) ? smartVod.optString("vod_content") : content);
 
@@ -322,7 +415,7 @@ public class KG extends Spider {
         try {
             // 🎬 啟動日誌
             Proxy.log("<b style='color:#e74c3c;'>🎬 [播放解析啟動]</b> 原始ID: " + originalUrl);
-            
+
             varPool.clear();
             varPool.put("play_id", originalUrl);
             varPool.put("final_url", originalUrl); 
@@ -331,7 +424,64 @@ public class KG extends Spider {
             JSONArray steps = play.optJSONArray("steps");
             int stepCount = (steps != null ? steps.length() : 0);
             boolean finalStepSuccess = false;
+            // ✅ jx 动态解析配置
+            String jx = play.optString("jx", "");
+            if (!TextUtils.isEmpty(jx)) {
+                try {
+                    Proxy.log("<span style='color:#9b59b6;'>[jx配置] 请求: </span>" + jx);
+                    OkResult cfgRes = KaiGeNet.smartRequest(this.siteUrl, "get", jx, null, getHeaders(null));
+                    String cfgBody = cfgRes.getBody();
 
+                    if (!TextUtils.isEmpty(cfgBody)) {
+                        String jxList  = play.optString("jx_list",  "");
+                        String jxTitle = play.optString("jx_title", "");
+                        String jxParse = play.optString("jx_parse", "");
+
+                        if (!TextUtils.isEmpty(jxList) && !TextUtils.isEmpty(jxTitle) && !TextUtils.isEmpty(jxParse)) {
+                            // 第一步：切出线路列表片段
+                            // ✅ 支持两种写法：JSON路径(data.jiexiDataList) 或 切刀规则(jiexiDataList&&[)
+                            String block = "";
+                            if (jxList.contains(".") && !jxList.contains("&&")) {
+                                try {
+                                    JSONObject cfgJson = new JSONObject(cfgBody);
+                                    Object pathResult = getJsonByPath(cfgJson, jxList);
+                                    block = pathResult != null ? pathResult.toString() : "";
+                                } catch (Exception ignored) {}
+                            } else {
+                                block = KaiGeEngine.doExtract(cfgBody, jxList, this.siteUrl).value;
+                            }
+                            Proxy.log("<span style='color:#3498db;'>[jx配置] 切出片段长度: </span>" + block.length());
+
+                            String val = "";
+                            try {
+                                // ✅ 优先：标准JSON数组格式（如 hktvyb）
+                                JSONArray jxArray = new JSONArray(block);
+                                for (int j = 0; j < jxArray.length(); j++) {
+                                    JSONObject entry = jxArray.getJSONObject(j);
+                                    if (flag.equals(entry.optString(jxTitle))) {
+                                        val = entry.optString(jxParse, "");
+                                        break;
+                                    }
+                                }
+                            } catch (Exception ignored) {
+                                // ✅ 兜底：切刀规则（如 qdys1 的JS文件格式）
+                                String titleRule = "\"" + jxTitle + "\":\"" + flag + "\"&&\"" + jxParse + "\":\"&&\"";
+                                val = KaiGeEngine.doExtract(block, titleRule, this.siteUrl).value;
+                            }
+                            val = val.replace("\/", "/").replace("\", "").trim();
+
+                            varPool.put("jx_parse", val);
+                            if (!TextUtils.isEmpty(val)) {
+                                Proxy.log("<span style='color:#2ecc71;'>[jx配置] 命中 [" + flag + "] jx_parse = </span>" + val);
+                            } else {
+                                Proxy.log("<span style='color:#f1c40f;'>[jx配置] 线路 [" + flag + "] 无解析前缀，视为直链</span>");
+                            }
+                        }
+                    }
+                } catch (Exception ex) {
+                    Proxy.log("<b style='color:red;'>[jx配置] 失败: </b>" + ex.getMessage());
+                }
+            }
             if (stepCount == 0) {
                 boolean isStream = originalUrl.toLowerCase().contains(".m3u8") || originalUrl.toLowerCase().contains(".mp4");
                 JSONObject res = new JSONObject();
@@ -347,10 +497,10 @@ public class KG extends Spider {
                 JSONObject step = steps.getJSONObject(i);
                 String stepUrl = replaceStepVars(step.optString("url", varPool.get("final_url")));
                 String method = step.optString("method", "get");
-                
+
                 // 💡 獲取當前步驟的請求頭
                 Map<String, String> headers = getHeaders(step.optJSONObject("headers"));
-                
+
                 // 🚀 凱哥監控：Step 請求細節（含 URL 和 Headers）
                 Proxy.log("<span style='color:#3498db;'>[Step " + (i + 1) + " 請求]</span> " + method.toUpperCase() + " -> " + stepUrl);
                 Proxy.log("<span style='color:#9b59b6;'>[請求頭查看]</span> " + headers.toString());
@@ -358,7 +508,7 @@ public class KG extends Spider {
             // 1. 發起請求
             OkResult res = KaiGeNet.smartRequest(this.siteUrl, method, stepUrl, replaceStepVars(step.optString("body")), getHeaders(step.optJSONObject("headers")));
             String html = res.getBody();
-            
+
             // 🚀 凱哥暴力監控：不論 html 是否為空，通通打印！
             Proxy.log("<b style='color:#3498db;'>📥 [Step " + (i + 1) + " 返回監控]</b>");
             if (TextUtils.isEmpty(html)) {
@@ -379,7 +529,7 @@ if (vars != null) {
                         String k = it.next();
                         String vRule = vars.optString(k).trim(); // 去掉可能存在的空格
                         String val = "";
-                        
+
                         // 🚀 1. 增強型 JSON 提取
                         if (vRule.startsWith("json:")) {
                             try {
@@ -397,10 +547,10 @@ if (vars != null) {
                         // 🚀 2. 暴力清洗提取到的數據
                         if (!TextUtils.isEmpty(val)) {
                             // 幹掉所有反斜槓，把 \/ 變成 /
-                            val = val.replace("\\/", "/").replace("\\", "").trim();
-                            
+                            val = val.replace("\/", "/").replace("\", "").trim();
+
                             varPool.put(k, val);
-                            
+
                             // 💡 變量提取監控
                             Proxy.log("    └─ <span style='color:#f1c40f;'>[提取成功]</span> " + k + " = " + (val.length() > 80 ? val.substring(0, 80) + "..." : val));
 
@@ -417,7 +567,7 @@ if (vars != null) {
                 }
             } 
 
-            String finalUrl = varPool.get("final_url").replace("\\/", "/");
+            String finalUrl = varPool.get("final_url").replace("\/", "/");
             boolean finalHasStream = finalUrl.toLowerCase().contains(".m3u8") || finalUrl.toLowerCase().contains(".mp4");
             int pValue = (finalStepSuccess || finalHasStream) ? 0 : 1;
 
@@ -425,7 +575,7 @@ if (vars != null) {
             resJson.put("parse", pValue);
             resJson.put("url", (pValue == 0) ? finalUrl : originalUrl);
             resJson.put("header", getPlayHeaders(play));
-            
+
             // 🚀 最終推送 JSON 日誌
             String finalPush = resJson.toString();
             Proxy.log("<b style='color:#2ecc71;'>🚀 [Final:推送 JSON]</b>");
@@ -454,49 +604,83 @@ private String parseList(String html, String pg, boolean isSearch) {
     try {
         JSONArray list = new JSONArray();
         String prefix = isSearch ? "sc_" : "cate_";
-        
-        if (html.trim().startsWith("{") && html.contains("\"list\"")) {
+        String detailTemplate = rule.optString("detail_url", "");
+
+        String itemRule = rule.optString(prefix + "item", rule.optString("cate_item", ""));
+        String idRule     = rule.optString(prefix + "id",      rule.optString("cate_id",      ""));
+        String nameRule   = rule.optString(prefix + "name",    rule.optString("cate_name",    ""));
+        String picRule    = rule.optString(prefix + "pic",     rule.optString("cate_pic",     ""));
+        String remarkRule = rule.optString(prefix + "remarks", rule.optString("cate_remarks", ""));
+
+        // ✅ 判断是否走 json: 模式（cate_item 以 json: 开头）
+        if (itemRule.toLowerCase().startsWith("json:")) {
+            // 取数组key，如 json:list -> list
+            String arrayKey = itemRule.substring(5).trim();
             JSONObject json = new JSONObject(html);
-            JSONArray array = json.optJSONArray("list");
+            JSONArray array = json.optJSONArray(arrayKey);
             if (array != null) {
-                String detailTemplate = rule.optString("detail_url", "");
                 for (int i = 0; i < array.length(); i++) {
                     JSONObject item = array.getJSONObject(i);
                     JSONObject vod = new JSONObject();
-                    
-                    String vId = item.optString("id");
-                    if (!TextUtils.isEmpty(vId)) {
-                        if (!detailTemplate.isEmpty() && !vId.startsWith("http")) {
-                            vod.put("vod_id", detailTemplate.replace("{id}", vId));
-                        } else {
-                            vod.put("vod_id", vId.startsWith("http") ? vId : this.siteUrl + (vId.startsWith("/") ? "" : "/") + vId);
-                        }
+
+                    // 取各字段：json:movie_id -> movie_id，没写json:则用原值兜底
+                    String vId      = item.optString(stripJson(idRule),      item.optString("vod_id", item.optString("id", "")));
+                    String vName    = item.optString(stripJson(nameRule),    item.optString("vod_name", item.optString("name", "")));
+                    String vPic     = item.optString(stripJson(picRule),     item.optString("vod_pic", item.optString("pic", "")));
+                    String vRemarks = item.optString(stripJson(remarkRule),  item.optString("vod_remarks", item.optString("remarks", "")));
+
+                    if (TextUtils.isEmpty(vId) || TextUtils.isEmpty(vName)) continue;
+
+                    if (!detailTemplate.isEmpty() && !vId.startsWith("http")) {
+                        vod.put("vod_id", detailTemplate.replace("{id}", vId));
+                    } else {
+                        vod.put("vod_id", vId.startsWith("http") ? vId : this.siteUrl + (vId.startsWith("/") ? "" : "/") + vId);
                     }
 
-                    vod.put("vod_name", item.optString("name"));
-                    
-                    String vPic = item.optString("pic");
+                    vod.put("vod_name", vName);
                     if (!TextUtils.isEmpty(vPic) && vPic.startsWith("//")) vPic = "http:" + vPic;
-                    vod.put("vod_pic", vPic);
-                    
-                    vod.put("vod_remarks", item.optString("remarks"));
-                    
+                    vod.put("vod_pic",     vPic);
+                    vod.put("vod_remarks", vRemarks);
+
                     if (vod.has("vod_id")) list.put(vod);
                 }
             }
+
+        // ✅ 没有写 cate_item，但返回的是标准JSON（自动兼容苹果CMS）
+        } else if (html != null && html.trim().startsWith("{")) {
+            JSONObject json = new JSONObject(html);
+            String listPath = rule.optString("cate_list_path", "list");
+            Object pathResult = getJsonByPath(json, listPath);
+            JSONArray array = pathResult instanceof JSONArray ? (JSONArray) pathResult : null;
+            // 兼容旧逻辑：找不到指定路径则尝试默认 list
+            if (array == null) array = json.optJSONArray("list");
+            if (array != null) {
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject vod = KaiGeSmart.parseListItem(array.getJSONObject(i));
+                    if (!vod.has("vod_id")) continue;
+
+                    String vId = vod.optString("vod_id");
+                    if (!detailTemplate.isEmpty() && !vId.startsWith("http")) {
+                        vod.put("vod_id", detailTemplate.replace("{id}", vId));
+                    } else {
+                        vod.put("vod_id", vId.startsWith("http") ? vId : this.siteUrl + (vId.startsWith("/") ? "" : "/") + vId);
+                    }
+                    list.put(vod);
+                }
+            }
+
+        // ✅ 原有 HTML CSS选择器逻辑，完全保留
         } else {
             Document doc = Jsoup.parse(html);
-            String itemRule = rule.optString(prefix + "item", rule.optString("cate_item"));
             Elements items = doc.select(itemRule);
-            String detailTemplate = rule.optString("detail_url", "");
 
             for (Element item : items) {
                 JSONObject smartVod = KaiGeSmart.parseList(item);
                 JSONObject vod = new JSONObject();
-                
-                String vId = extract(item, rule.optString(prefix + "id", rule.optString("cate_id")));
+
+                String vId = extract(item, idRule);
                 if (TextUtils.isEmpty(vId)) vId = smartVod.optString("vod_id");
-                
+
                 if (!TextUtils.isEmpty(vId)) {
                     if (isSearch && !detailTemplate.isEmpty() && !vId.startsWith("http")) {
                         vod.put("vod_id", detailTemplate.replace("{id}", vId));
@@ -505,30 +689,37 @@ private String parseList(String html, String pg, boolean isSearch) {
                     }
                 }
 
-                String vName = extract(item, rule.optString(prefix + "name", rule.optString("cate_name")));
+                String vName = extract(item, nameRule);
                 vod.put("vod_name", TextUtils.isEmpty(vName) ? smartVod.optString("vod_name") : vName);
-                
-                String vPic = extract(item, rule.optString(prefix + "pic", rule.optString("cate_pic")));
+
+                String vPic = extract(item, picRule);
                 if (TextUtils.isEmpty(vPic)) vPic = smartVod.optString("vod_pic");
                 if (!TextUtils.isEmpty(vPic) && vPic.startsWith("//")) vPic = "http:" + vPic;
                 vod.put("vod_pic", vPic);
-                
-                String vRemarks = extract(item, rule.optString(prefix + "remarks", rule.optString("cate_remarks")));
+
+                String vRemarks = extract(item, remarkRule);
                 vod.put("vod_remarks", TextUtils.isEmpty(vRemarks) ? smartVod.optString("vod_remarks") : vRemarks);
 
                 if (vod.has("vod_id")) list.put(vod);
             }
         }
+
         return new JSONObject().put("list", list).put("page", pg).toString();
-    } catch (Exception e) { 
-        return "{\"list\":[]}"; 
+    } catch (Exception e) {
+        return "{\"list\":[]}";
     }
+}
+
+// ✅ 工具方法：剥掉 json: 前缀，取字段名
+private String stripJson(String rule) {
+    if (TextUtils.isEmpty(rule)) return "";
+    return rule.toLowerCase().startsWith("json:") ? rule.substring(5).trim() : rule.trim();
 }
 
 private String extract(Object root, String ruleStr) {
         try {
             if (TextUtils.isEmpty(ruleStr) || root == null) return "";
-            
+
             // 🚀 關鍵點 1：讓規則支持變量替換
             // 這樣你才能在規則裡寫 "{host}/vod/" 或者使用之前 vars 存下的 {kkk}
             String realRule = replaceStepVars(ruleStr);
@@ -582,7 +773,7 @@ public String homeContent(boolean filter) {
     try {
         logger("🏠 [主頁] 正在加載分類導航...");
         JSONArray classes = rule.optJSONArray("classes");
-        
+
         if (classes == null || classes.length() == 0) {
             logger("🚨 [主頁] 警告：JSON 規則中未定義 classes 或格式錯誤");
             return "";
@@ -595,29 +786,66 @@ public String homeContent(boolean filter) {
         for (int i = 0; i < classes.length(); i++) {
             JSONObject oldCate = classes.getJSONObject(i);
             JSONObject newCate = new JSONObject();
-            
+
             String name = oldCate.optString("type_name", oldCate.optString("name"));
             String id = oldCate.optString("type_id", oldCate.optString("id"));
-            
+
             newCate.put("type_name", name);
             newCate.put("type_id", id);
             resultClasses.put(newCate);
         }
 
         logger("✅ [主頁] 分類加載成功，共 " + resultClasses.length() + " 個頻道");
-        
+
         JSONObject result = new JSONObject();
         result.put("class", resultClasses);
-        
+
         // 如果規則裡有篩選數據(filters)，也可以在這裡放進去
         if (rule.has("filters")) {
             result.put("filters", rule.optJSONObject("filters"));
         }
-        
+
         return result.toString();
     } catch (Exception e) {
         logger("🚨 [主頁異常]: " + e.getMessage());
         return "";
     }
 }
+    // ✅ 通用JSON路径取值，支持多级路径如 data.list、data.jiexiDataList
+    private Object getJsonByPath(JSONObject json, String path) {
+        try {
+            Object current = json;
+            for (String key : path.split("\.")) {
+                if (current instanceof JSONObject) {
+                    current = ((JSONObject) current).opt(key);
+                } else {
+                    return null;
+                }
+            }
+            return current;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ✅ 新增：弹幕入口方法，FongMi 框架播放时会调用
+    @Override
+    public String danmaku(String url) throws Exception {
+        // 从当前视频的详情中提取 title 和 episode
+        // 这里假设 URL 格式中包含 vod_id，你需要根据实际站点调整解析逻辑
+        String title = varPool.get("vod_name");
+        String episode = varPool.get("vod_episode");
+
+        if (TextUtils.isEmpty(title)) {
+            // 兜底：从 URL 或配置中提取
+            title = "未知标题";
+        }
+        if (TextUtils.isEmpty(episode)) {
+            episode = "1";
+        }
+
+        // 返回弹幕代理地址，FongMi 会自动请求
+        return Proxy.getUrl() + "?do=danmu&title=" + URLEncoder.encode(title, "UTF-8") 
+             + "&episode=" + URLEncoder.encode(episode, "UTF-8");
+    }
 }
