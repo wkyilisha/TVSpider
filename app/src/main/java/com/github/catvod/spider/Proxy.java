@@ -1,11 +1,11 @@
 package com.github.catvod.spider;
 
 import com.github.catvod.crawler.Spider;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URLDecoder;
+import java.util.HashMap;
 import java.util.Map;
 
 public class Proxy extends Spider {
@@ -38,20 +38,15 @@ public class Proxy extends Spider {
                         if (req == null) continue;
 
                         try (OutputStream out = client.getOutputStream()) {
-                            // 🚀 分支 1：清空指令
                             if (req.contains("/?clean")) {
                                 sb.setLength(0);
                                 sb.append("<div style='color:red;'>--- 日誌已手動清空 ---</div>");
                                 out.write("HTTP/1.1 200 OK\r\n\r\nOK".getBytes());
-                            } 
-                            // 🚀 分支 2：專門給 JS 調用的純數據接口
-                            else if (req.contains("/get_logs")) {
+                            } else if (req.contains("/get_logs")) {
                                 String data = sb.toString();
                                 String resp = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n" + data;
                                 out.write(resp.getBytes("UTF-8"));
-                            } 
-                            // 🚀 分支 3：主面板界面
-                            else {
+                            } else {
                                 String html = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" +
                                         "<html><head><meta charset='utf-8'><style>" +
                                         "body{background:#fff;color:#000;font-family:monospace;font-size:12px;margin:0;padding:10px;}" +
@@ -65,7 +60,7 @@ public class Proxy extends Spider {
                                         "function clr(){fetch('/?clean').then(()=>location.reload());}" +
                                         "let last = '';" +
                                         "setInterval(() => {" +
-                                        "  fetch('/get_logs').then(r=>r.text()).then(data=>{" + // 🚀 關鍵：只拿純日誌數據
+                                        "  fetch('/get_logs').then(r=>r.text()).then(data=>{" +
                                         "    if(data !== last) {" +
                                         "      document.getElementById('logs').innerHTML = data;" +
                                         "      last = data;" +
@@ -84,5 +79,42 @@ public class Proxy extends Spider {
         }).start();
     }
 
-    public Object[] proxy(Map<String, String> params) { return null; }
+    /**
+     * 注意：此方法不是重写父类方法，而是因为 TV 应用会通过反射调用它。
+     * 不要加 @Override 注解，否则编译会失败。
+     */
+    public Object[] proxy(Map<String, String> params) {
+        log("收到 proxy 调用: " + params);
+
+        String doParam = params.get("do");
+        if (doParam == null || !doParam.equals("danmu")) {
+            return errorResponse(400, "Missing or invalid 'do' parameter");
+        }
+
+        String title = params.get("title");
+        String episode = params.get("episode");
+        if (title == null || title.isEmpty() || episode == null || episode.isEmpty()) {
+            return errorResponse(400, "Missing title or episode");
+        }
+
+        try {
+            title = URLDecoder.decode(title, "UTF-8");
+        } catch (Exception ignored) {}
+        try {
+            episode = URLDecoder.decode(episode, "UTF-8");
+        } catch (Exception ignored) {}
+
+        log("弹幕请求：title=" + title + ", episode=" + episode);
+
+        // ✅ 修复：调用 DanmuHelper 获取真实弹幕
+        return DanmuHelper.getDanmuResponse(params);
+    }
+
+    private Object[] errorResponse(int code, String message) {
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Content-Type", "text/plain; charset=utf-8");
+        log("错误响应: " + code + " " + message);
+        return new Object[]{code, "text/plain; charset=utf-8", 
+                new ByteArrayInputStream(message.getBytes()), headers};
+    }
 }
