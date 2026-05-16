@@ -77,52 +77,63 @@ private void logCheck(String title, String html, boolean showSource) {
             logger("✅ [系統] 站點配置加載完成: " + rule.optString("site_name"));
             logger("🌐 [系統] 域名自動綁定: " + this.siteUrl);
 
-            // ✅ 预热首页：手动处理302拿cookie，只做一次
-            try {
-                Map<String, List<String>> redirectHeaders = OkHttp.getLocationHeader(
-                    this.siteUrl, getHeaders(null));
-                // ✅ 安全检测：如果跳转目标不是同域名则拒绝
-                String location = OkHttp.getLocation(redirectHeaders);
-                if (!TextUtils.isEmpty(location)) {
-                    String locationHost = "";
-                    try { locationHost = new java.net.URL(location).getHost(); } catch (Exception ignored) {}
-                    String siteHost = "";
-                    try { siteHost = new java.net.URL(this.siteUrl).getHost(); } catch (Exception ignored) {}
-                    if (!locationHost.equals(siteHost)) {
-                        logger("<span style='color:#f1c40f;'>⚠️ [预热] 跨域跳转已拒绝: </span>" + location);
-                        throw new Exception("cross domain redirect blocked");
-                    }
-                }
-                String redirectCookie = "";
-                if (redirectHeaders != null) {
-                    List<String> cookies = redirectHeaders.get("Set-Cookie");
-                    if (cookies == null) cookies = redirectHeaders.get("set-cookie");
-                    if (cookies != null && !cookies.isEmpty()) {
-                        StringBuilder sb = new StringBuilder();
-                        for (String c : cookies) {
-                            String part = c.split(";")[0].trim();
-                            if (sb.length() > 0) sb.append("; ");
-                            sb.append(part);
+            // ✅ 仅当规则明确开启 cdndefend 时才触发预热和CDN盾检测
+            if (rule.optBoolean("cdndefend", false)) {
+                try {
+                    Map<String, List<String>> redirectHeaders = OkHttp.getLocationHeader(
+                        this.siteUrl, getHeaders(null));
+                    // ✅ 安全检测：如果跳转目标不是同域名则拒绝
+                    String location = OkHttp.getLocation(redirectHeaders);
+                    if (!TextUtils.isEmpty(location)) {
+                        String locationHost = "";
+                        try { locationHost = new java.net.URL(location).getHost(); } catch (Exception ignored) {}
+                        String siteHost = "";
+                        try { siteHost = new java.net.URL(this.siteUrl).getHost(); } catch (Exception ignored) {}
+                        if (!locationHost.equals(siteHost)) {
+                            logger("<span style='color:#f1c40f;'>⚠️ [预热] 跨域跳转已拒绝: </span>" + location);
+                            throw new Exception("cross domain redirect blocked");
                         }
-                        redirectCookie = sb.toString();
                     }
+                    String redirectCookie = "";
+                    if (redirectHeaders != null) {
+                        List<String> cookies = redirectHeaders.get("Set-Cookie");
+                        if (cookies == null) cookies = redirectHeaders.get("set-cookie");
+                        if (cookies != null && !cookies.isEmpty()) {
+                            StringBuilder sb = new StringBuilder();
+                            for (String c : cookies) {
+                                String part = c.split(";")[0].trim();
+                                if (sb.length() > 0) sb.append("; ");
+                                sb.append(part);
+                            }
+                            redirectCookie = sb.toString();
+                        }
+                    }
+                    if (!TextUtils.isEmpty(redirectCookie)) {
+                        JSONObject hdrs = rule.optJSONObject("headers");
+                        if (hdrs == null) hdrs = new JSONObject();
+                        String existCookie = hdrs.optString("Cookie", "");
+                        hdrs.put("Cookie", TextUtils.isEmpty(existCookie) ? redirectCookie : existCookie + "; " + redirectCookie);
+                        rule.put("headers", hdrs);
+                        KaiGeNet.putCookie(this.siteUrl, redirectCookie);
+                        logger("<span style='color:#2ecc71;'>🍪 [302Token] cookie成功: </span>" + redirectCookie);
+                    }
+                    // 带cookie预热一次，处理CDN盾
+                    String homeHtml = KaiGeNet.smartRequest(this.siteUrl, "get", this.siteUrl, null, getHeaders(null)).getBody();
+                    // ✅ 检测CDN盾
+                    if (!TextUtils.isEmpty(homeHtml) && homeHtml.contains("cdndefend_js_cookie")) {
+                        String cookie = KaiGeNet.cdnDefendCookie(homeHtml);
+                        if (!TextUtils.isEmpty(cookie)) {
+                            JSONObject hdrs = rule.optJSONObject("headers");
+                            if (hdrs == null) hdrs = new JSONObject();
+                            hdrs.put("Cookie", cookie);
+                            rule.put("headers", hdrs);
+                            logger("<span style='color:#2ecc71;'>🍪 [CDN盾] 自动计算cookie成功: </span>" + cookie);
+                        }
+                    }
+                    logger("<span style='color:#2ecc71;'>✅ [首页预热] 完成</span>");
+                } catch (Exception ex) {
+                    logger("<span style='color:#f1c40f;'>⚠️ [首页预热] 异常: </span>" + ex.getMessage());
                 }
-                if (!TextUtils.isEmpty(redirectCookie)) {
-                    // ✅ 同时存入 rule.headers 和 KaiGeNet.cookieJar，确保所有请求都带上
-                    JSONObject hdrs = rule.optJSONObject("headers");
-                    if (hdrs == null) hdrs = new JSONObject();
-                    String existCookie = hdrs.optString("Cookie", "");
-                    hdrs.put("Cookie", TextUtils.isEmpty(existCookie) ? redirectCookie : existCookie + "; " + redirectCookie);
-                    rule.put("headers", hdrs);
-                    // ✅ 同时写入 cookieJar，后续所有 smartRequest 自动携带
-                    // KaiGeNet.putCookie not available
-                    logger("<span style='color:#2ecc71;'>🍪 [302Token] cookie成功: </span>" + redirectCookie);
-                }
-                // 带cookie预热一次，处理CDN盾
-                KaiGeNet.smartRequest(this.siteUrl, "get", this.siteUrl, null, getHeaders(null));
-                logger("<span style='color:#2ecc71;'>🍪 [首页预热] 完成</span>");
-            } catch (Exception ex) {
-                logger("<span style='color:#f1c40f;'>⚠️ [首页预热] 异常: </span>" + ex.getMessage());
             }
 
         } catch (Exception e) {
@@ -184,13 +195,16 @@ private void logCheck(String title, String html, boolean showSource) {
 
                 // 先解析出 items，再进行逻辑判断
                 String itemRule = rule.optString("cate_item");
-                Document doc = Jsoup.parse(html);
-                Elements items = doc.select(itemRule); // 👈 必须先定义 items
-
-                if (!items.isEmpty()) { 
-                    Proxy.log("<b style='color:#2ecc71;'>✅ [定位層成功] 匹配到項目数量: " + items.size() + "</b>");
+                if (!TextUtils.isEmpty(itemRule)) {
+                    Document doc = Jsoup.parse(html);
+                    Elements items = doc.select(itemRule);
+                    if (!items.isEmpty()) {
+                        Proxy.log("<b style='color:#2ecc71;'>✅ [定位層成功] 匹配到項目数量: " + items.size() + "</b>");
+                    } else {
+                        Proxy.log("<b style='color:red;'>❌ [定位層錯誤] 規則 [" + itemRule + "] 找不到內容，請修改 cate_item！</b>");
+                    }
                 } else {
-                    Proxy.log("<b style='color:red;'>❌ [定位層錯誤] 規則 [" + itemRule + "] 找不到內容，請修改 cate_item！</b>");
+                    Proxy.log("<b style='color:#3498db;'>📋 [定位層] JSON接口模式，跳過CSS選擇器</b>");
                 }
             }
             // 💡 凱哥監控：顯示返回數據長度
@@ -301,6 +315,13 @@ if (html != null && html.trim().startsWith("{")) {
             vod.put("vod_play_from",item.optString("vod_play_from",""));
             vod.put("vod_play_url", item.optString("vod_play_url", ""));
             Proxy.log("<b style='color:#2ecc71;'>✅ [详情] JSON直解成功: </b>" + vod.optString("vod_name"));
+            // ✅ 保存标题和集数到 varPool，供弹幕使用
+            varPool.put("vod_name", vod.optString("vod_name", "未知标题"));
+            String playUrl = vod.optString("vod_play_url", "");
+            if (!TextUtils.isEmpty(playUrl)) {
+                String[] episodes = playUrl.split("#");
+                varPool.put("vod_total_episode", String.valueOf(episodes.length));
+            }
             return new JSONObject().put("list", new JSONArray().put(vod)).toString();
         }
     } catch (Exception ex) {
@@ -346,6 +367,13 @@ Document doc = Jsoup.parse(html);
                 processOriginalDetail(doc, vod);
             }
 
+            // ✅ 保存标题和集数到 varPool，供弹幕使用
+            varPool.put("vod_name", vod.optString("vod_name", "未知标题"));
+            String playUrl = vod.optString("vod_play_url", "");
+            if (!TextUtils.isEmpty(playUrl)) {
+                String[] episodes = playUrl.split("#");
+                varPool.put("vod_total_episode", String.valueOf(episodes.length));
+            }
             return new JSONObject().put("list", new JSONArray().put(vod)).toString();
         } catch (Exception e) { 
             Proxy.log("<b style='color:red;'>🚨 [詳情異常]:</b> " + e.getMessage());
@@ -362,6 +390,16 @@ Document doc = Jsoup.parse(html);
             String[] parts = fromRule.split("&&");
             cssFrom = parts[0].contains("[包含:") ? (parts.length > 1 ? parts[1] : "h3") : parts[0];
         }
+                // ← 加这几行调试
+        Elements allListsDebug = doc.select(listRule);
+        Proxy.log("🔍 [調試] dt_from 規則: " + cssFrom);
+        Proxy.log("🔍 [調試] dt_list 規則: " + listRule);
+        Proxy.log("🔍 [調試] dt_list 匹配到列表数: " + allListsDebug.size());
+        for (int i = 0; i < allListsDebug.size(); i++) {
+            Elements links = allListsDebug.get(i).select("a");
+            Proxy.log("🔍 [調試] 第" + (i+1) + "个列表 链接数: " + links.size() + " 第一个链接: " + (links.isEmpty() ? "空" : links.get(0).attr("href")));
+        }
+        // ← 调试结束
         Elements fromElements = doc.select(cssFrom);
         List<String> fList = new ArrayList<>();
         List<String> pLists = new ArrayList<>();
@@ -369,27 +407,16 @@ Document doc = Jsoup.parse(html);
         for (Element from : fromElements) {
             String sourceName = from.text().trim();
             if (TextUtils.isEmpty(sourceName)) sourceName = "播放線路 " + (fromElements.indexOf(from) + 1);
-            Element nextList = null;
-            Element p = from.parent(); 
-            while (p != null && nextList == null) {
-                Element sibling = p.nextElementSibling();
-                while (sibling != null) {
-                    nextList = sibling.selectFirst(listRule);
-                    if (nextList != null) break;
-                    sibling = sibling.nextElementSibling();
-                }
-                if (nextList != null) break;
-                p = p.parent();
-                if (p != null && p.tagName().equals("body")) break;
-            }
-            if (nextList == null) {
-                Elements allLists = doc.select(listRule);
-                int idx = fromElements.indexOf(from);
-                if (idx < allLists.size()) nextList = allLists.get(idx);
-            }
+
+            // 直接按索引取对应列表
+            Elements allLists = doc.select(listRule);
+            int idx = fromElements.indexOf(from);
+            Element nextList = (idx < allLists.size()) ? allLists.get(idx) : null;
+
             if (nextList != null) {
+                Proxy.log("🔍 [pLists存入] 第" + fList.size() + "条线路 HTML前50: " + nextList.outerHtml().substring(0, Math.min(50, nextList.outerHtml().length())));
                 fList.add(sourceName);
-                pLists.add(nextList.outerHtml()); 
+                pLists.add(nextList.outerHtml());
             }
         }
 
@@ -399,14 +426,20 @@ Document doc = Jsoup.parse(html);
             Document listDoc = Jsoup.parse(pLists.get(i));
             Elements aElements = listDoc.select("a");
             for (Element a : aElements) {
-                String pName = extract(a, rule.optString("dt_list_name")); 
-                String pUrl = extract(a, rule.optString("dt_list_url"));
-                if (!pName.isEmpty() && !pUrl.isEmpty()) urls.add(pName + "$" + pUrl);
+                String pName = a.text().trim();
+                String pUrl = a.attr("href").trim();
+                if (!pName.isEmpty() && !pUrl.isEmpty() && !pUrl.contains("javascript")) {
+                    urls.add(pName + "$" + pUrl);
+                }
             }
             playList.add(TextUtils.join("#", urls));
         }
+
         vod.put("vod_play_from", TextUtils.join("$$$", fList));
         vod.put("vod_play_url", TextUtils.join("$$$", playList));
+
+        // ← 加这行
+        Proxy.log("🔍 [最終組裝] from: " + vod.optString("vod_play_from") + " | url前100: " + vod.optString("vod_play_url").substring(0, Math.min(100, vod.optString("vod_play_url").length())));
     }
 
 @Override
@@ -415,6 +448,23 @@ Document doc = Jsoup.parse(html);
         try {
             // 🎬 啟動日誌
             Proxy.log("<b style='color:#e74c3c;'>🎬 [播放解析啟動]</b> 原始ID: " + originalUrl);
+
+            // ✅ 从播放链接反查集数（弹幕需要）
+            String playUrl = varPool.get("vod_play_url");
+            String currentEpisode = "1";
+            if (!TextUtils.isEmpty(playUrl)) {
+                String[] episodes = playUrl.split("#");
+                for (int i = 0; i < episodes.length; i++) {
+                    if (episodes[i].contains(id)) {
+                        String epName = episodes[i].split("\\$")[0];
+                        currentEpisode = epName.replaceAll("[^0-9]", "");
+                        if (TextUtils.isEmpty(currentEpisode)) currentEpisode = String.valueOf(i + 1);
+                        break;
+                    }
+                }
+            }
+            varPool.put("vod_episode", currentEpisode);
+            Proxy.log("<span style='color:#9b59b6;'>[弹幕] 标题=" + varPool.get("vod_name") + ", 集数=" + currentEpisode + "</span>");
 
             varPool.clear();
             varPool.put("play_id", originalUrl);
@@ -468,7 +518,7 @@ Document doc = Jsoup.parse(html);
                                 String titleRule = "\"" + jxTitle + "\":\"" + flag + "\"&&\"" + jxParse + "\":\"&&\"";
                                 val = KaiGeEngine.doExtract(block, titleRule, this.siteUrl).value;
                             }
-                            val = val.replace("\\/", "/").replace("\\\\", "").trim();
+                            val = val.replace("\\/", "/").replace("\\", "").trim();
 
                             varPool.put("jx_parse", val);
                             if (!TextUtils.isEmpty(val)) {
@@ -547,7 +597,7 @@ if (vars != null) {
                         // 🚀 2. 暴力清洗提取到的數據
                         if (!TextUtils.isEmpty(val)) {
                             // 幹掉所有反斜槓，把 \/ 變成 /
-                            val = val.replace("\\/", "/").replace("\\\\", "").trim();
+                            val = val.replace("\\/", "/").replace("\\", "").trim();
 
                             varPool.put(k, val);
 
@@ -656,12 +706,7 @@ private String parseList(String html, String pg, boolean isSearch) {
             if (array == null) array = json.optJSONArray("list");
             if (array != null) {
                 for (int i = 0; i < array.length(); i++) {
-                    JSONObject item = array.getJSONObject(i);
-                    JSONObject vod = new JSONObject();
-                    vod.put("vod_id", item.optString("vod_id", item.optString("id", "")));
-                    vod.put("vod_name", item.optString("vod_name", item.optString("name", "")));
-                    vod.put("vod_pic", item.optString("vod_pic", item.optString("pic", "")));
-                    vod.put("vod_remarks", item.optString("vod_remarks", item.optString("remarks", "")));
+                    JSONObject vod = KaiGeSmart.parseListItem(array.getJSONObject(i));
                     if (!vod.has("vod_id")) continue;
 
                     String vId = vod.optString("vod_id");
@@ -833,23 +878,24 @@ public String homeContent(boolean filter) {
         }
     }
 
-    // ✅ 新增：弹幕入口方法，FongMi 框架播放时会调用
+    /**
+     * ✅ 弹幕入口方法
+     * FongMi 框架播放视频时会调用此方法获取弹幕地址
+     */
     public String danmaku(String url) throws Exception {
-        // 从当前视频的详情中提取 title 和 episode
-        // 这里假设 URL 格式中包含 vod_id，你需要根据实际站点调整解析逻辑
         String title = varPool.get("vod_name");
         String episode = varPool.get("vod_episode");
 
-        if (TextUtils.isEmpty(title)) {
-            // 兜底：从 URL 或配置中提取
-            title = "未知标题";
-        }
-        if (TextUtils.isEmpty(episode)) {
-            episode = "1";
+        // 兜底：从 URL 中提取集数
+        if (TextUtils.isEmpty(episode) && url.contains("$")) {
+            String epPart = url.split("\\$")[0];
+            episode = epPart.replaceAll("[^0-9]", "");
         }
 
-        // 返回弹幕代理地址，FongMi 会自动请求
-        return Proxy.getUrl() + "?do=danmu&title=" + URLEncoder.encode(title, "UTF-8") 
+        if (TextUtils.isEmpty(title)) title = "未知标题";
+        if (TextUtils.isEmpty(episode)) episode = "1";
+
+        return Proxy.getUrl() + "?do=danmu&title=" + URLEncoder.encode(title, "UTF-8")
              + "&episode=" + URLEncoder.encode(episode, "UTF-8");
     }
 }
