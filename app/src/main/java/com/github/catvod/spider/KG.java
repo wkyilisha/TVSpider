@@ -468,7 +468,7 @@ Document doc = Jsoup.parse(html);
                                 String titleRule = "\"" + jxTitle + "\":\"" + flag + "\"&&\"" + jxParse + "\":\"&&\"";
                                 val = KaiGeEngine.doExtract(block, titleRule, this.siteUrl).value;
                             }
-                            val = val.replace("\/", "/").replace("\", "").trim();
+                            val = val.replace("\\/", "/").replace("\\\\", "").trim();
 
                             varPool.put("jx_parse", val);
                             if (!TextUtils.isEmpty(val)) {
@@ -547,7 +547,7 @@ if (vars != null) {
                         // 🚀 2. 暴力清洗提取到的數據
                         if (!TextUtils.isEmpty(val)) {
                             // 幹掉所有反斜槓，把 \/ 變成 /
-                            val = val.replace("\/", "/").replace("\", "").trim();
+                            val = val.replace("\\/", "/").replace("\\\\", "").trim();
 
                             varPool.put(k, val);
 
@@ -567,7 +567,7 @@ if (vars != null) {
                 }
             } 
 
-            String finalUrl = varPool.get("final_url").replace("\/", "/");
+            String finalUrl = varPool.get("final_url").replace("\\/", "/");
             boolean finalHasStream = finalUrl.toLowerCase().contains(".m3u8") || finalUrl.toLowerCase().contains(".mp4");
             int pValue = (finalStepSuccess || finalHasStream) ? 0 : 1;
 
@@ -815,7 +815,7 @@ public String homeContent(boolean filter) {
     private Object getJsonByPath(JSONObject json, String path) {
         try {
             Object current = json;
-            for (String key : path.split("\.")) {
+            for (String key : path.split("\\.")) {
                 if (current instanceof JSONObject) {
                     current = ((JSONObject) current).opt(key);
                 } else {
