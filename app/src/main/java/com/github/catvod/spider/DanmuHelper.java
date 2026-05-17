@@ -177,10 +177,12 @@ return "";
                         if (content.matches(AD_PATTERN)) continue;
 
                         String time = item.get(0).getAsString();
-                        String color = item.get(3).getAsString();
+                        String color = item.get(3).getAsString().replaceAll("[^0-9]", "");
+                        String fontSize = item.get(2).getAsString().replaceAll("[^0-9]", "");
+                        if (fontSize.isEmpty()) fontSize = "25";
                         long ts = System.currentTimeMillis() / 1000;
-                        xml.append(String.format("<d p=\"%s,1,25,%s,%d,0,0,0\">%s</d>\n",
-                        time, color, ts, escapeXml(content)));
+                        xml.append(String.format("<d p=\"%s,1,%s,%s,%d,0,0,0\">%s</d>\n",
+        time, fontSize, color, ts, escapeXml(content)));
                     }
                     xml.append("</i>");
                     return xml.toString();
