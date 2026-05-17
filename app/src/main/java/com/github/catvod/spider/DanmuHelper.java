@@ -24,7 +24,7 @@ public class DanmuHelper {
 
     // 弹幕源 API (可扩展)
     private static final String[] DANMU_SOURCES = {
-            "https://api.danmu.icu/?ac=dm&url={url}",
+            "https://danmu.zxz.ee/?type=xml&id={md5}",
             "https://dmku.hls.one/?ac=dm&url={url}"
     };
 
@@ -138,19 +138,38 @@ return "";
      */
     private static String fetchAndConvert(String videoUrl) {
         Proxy.log("🔍 [弹幕搜索] 开始搜索，videoUrl=" + videoUrl);
+        // 预先计算 md5
+        String videoMd5 = "";
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(videoUrl.getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) sb.append(String.format("%02x", b));
+            videoMd5 = sb.toString();
+            Proxy.log("🔑 [弹幕] videoUrl MD5=" + videoMd5);
+        } catch (Exception e) {
+            Proxy.log("❌ [弹幕] MD5计算失败: " + e.getMessage());
+        }
         for (String source : DANMU_SOURCES) {
             try {
-                String api = source.replace("{url}", URLEncoder.encode(videoUrl, "UTF-8"));
+                String api = source
+                        .replace("{md5}", videoMd5)
+                        .replace("{url}", URLEncoder.encode(videoUrl, "UTF-8"));
                 String res = OkHttp.string(api);
 
                 // 如果已经是 XML 格式
                 if (res.contains("<d")) return res;
 
-                // JSON 格式弹幕 —— 修复 NPE 和兼容性
+                // danmu.zxz.ee 无数据时返回空 <i></i>，跳过
+                if (res.contains("<i>") && !res.contains("<d")) {
+                    Proxy.log("⚠️ [弹幕] " + source + " 无弹幕数据，尝试下一源");
+                    continue;
+                }
+
+                // JSON 格式弹幕
                 JsonObject json = Json.safeObject(res);
                 JsonArray danmuku = null;
 
-                // 尝试多种常见格式
                 if (json.has("danmuku")) {
                     danmuku = json.getAsJsonArray("danmuku");
                 } else if (json.has("data") && json.get("data").isJsonObject()) {
@@ -160,35 +179,35 @@ return "";
                     }
                 }
 
-                // 兼容：data 直接是数组的情况
                 if (danmuku == null && json.has("data") && json.get("data").isJsonArray()) {
                     danmuku = json.getAsJsonArray("data");
                 }
+
                 Proxy.log("📦 [弹幕解析] source=" + source + " | danmuku条数=" + (danmuku != null ? danmuku.size() : 0));
                 if (danmuku != null && danmuku.size() > 0) {
                     StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?><i>\n");
                     for (JsonElement d : danmuku) {
-                        // 防御：确保是数组
                         if (!d.isJsonArray()) continue;
                         JsonArray item = d.getAsJsonArray();
-                        if (item.size() < 5) continue;  // 防御数组长度不足
+                        if (item.size() < 6) continue;
 
-                        String content = item.get(4).getAsString();
+                        String content = item.get(5).getAsString();
                         if (content.matches(AD_PATTERN)) continue;
 
                         String time = item.get(0).getAsString();
-                        String color = item.get(3).getAsString().replaceAll("[^0-9]", "");
                         String fontSize = item.get(2).getAsString().replaceAll("[^0-9]", "");
                         if (fontSize.isEmpty()) fontSize = "25";
+                        String color = item.get(4).getAsString().replaceAll("[^0-9]", "");
+                        if (color.isEmpty()) color = "16777215";
                         long ts = System.currentTimeMillis() / 1000;
                         xml.append(String.format("<d p=\"%s,1,%s,%s,%d,0,0,0\">%s</d>\n",
-        time, fontSize, color, ts, escapeXml(content)));
+                                time, fontSize, color, ts, escapeXml(content)));
                     }
                     xml.append("</i>");
                     return xml.toString();
                 }
             } catch (Exception e) {
-                Proxy.log("❌ [弹幕源失败] source=" + source + " | error=" + e.getMessage()); // ← 新增这行
+                Proxy.log("❌ [弹幕源失败] source=" + source + " | error=" + e.getMessage());
             }
         }
         return "";
