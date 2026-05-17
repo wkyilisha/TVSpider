@@ -74,15 +74,10 @@ public class DanmuHelper {
                         + "</i>";
             }
 
-            // ✅ 修复：返回 FongMi 标准格式
-            Map<String, String> headers = new HashMap<>();
-            headers.put("Content-Type", "application/xml; charset=utf-8");
-
             return new Object[]{
                     200,
                     "application/xml; charset=utf-8",
-                    new ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8)),
-                    headers
+                    new ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8))
             };
         } catch (Exception e) {
             SpiderDebug.log(e);
@@ -91,8 +86,7 @@ public class DanmuHelper {
             return new Object[]{
                     500,
                     "text/plain",
-                    new ByteArrayInputStream(e.getMessage().getBytes()),
-                    headers
+                    new ByteArrayInputStream(e.getMessage().getBytes())
             };
         }
     }
