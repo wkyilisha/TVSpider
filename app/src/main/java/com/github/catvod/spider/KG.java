@@ -457,6 +457,9 @@ Document doc = Jsoup.parse(html);
             String danmuPlayUrl = varPool.get("vod_play_url");
 
             varPool.clear();
+            // ✅ 备份恢复，防止 clear 丢失
+            if (!TextUtils.isEmpty(danmuTitle)) varPool.put("vod_name", danmuTitle);
+            if (!TextUtils.isEmpty(danmuPlayUrl)) varPool.put("vod_play_url", danmuPlayUrl);
 
             // ✅ 从播放链接反查集数（弹幕需要）
             String currentEpisode = "1";
