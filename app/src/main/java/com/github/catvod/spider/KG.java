@@ -459,17 +459,26 @@ Document doc = Jsoup.parse(html);
 
             // ✅ 从播放链接反查集数（弹幕需要）
             String currentEpisode = "1";
-            if (!TextUtils.isEmpty(danmuPlayUrl)) {
-                String[] episodes = danmuPlayUrl.split("#");
-                for (int i = 0; i < episodes.length; i++) {
-                    if (episodes[i].contains(id)) {
-                        String epName = episodes[i].split("\\$")[0];
-                        currentEpisode = epName.replaceAll("[^0-9]", "");
-                        if (TextUtils.isEmpty(currentEpisode)) currentEpisode = String.valueOf(i + 1);
-                        break;
-                    }
-                }
-            }
+if (!TextUtils.isEmpty(danmuPlayUrl)) {
+    String[] episodes = danmuPlayUrl.split("#");
+    Proxy.log("🔍 [弹幕集数] 共 " + episodes.length + " 集，正在匹配 id=" + id);
+    String cleanId = id.contains("?") ? id.split("\\?")[0] : id;
+    for (int i = 0; i < episodes.length; i++) {
+        String[] parts = episodes[i].split("\\$");
+        String epUrl = parts.length > 1 ? parts[parts.length - 1].trim() : "";
+        String cleanEpUrl = epUrl.contains("?") ? epUrl.split("\\?")[0] : epUrl;
+        if (!epUrl.isEmpty() && (epUrl.equals(id) || cleanEpUrl.equals(cleanId) || epUrl.contains(cleanId) || cleanId.contains(cleanEpUrl))) {
+            String epName = parts[0].replaceAll("[^0-9]", "");
+            currentEpisode = TextUtils.isEmpty(epName) ? String.valueOf(i + 1) : epName;
+            Proxy.log("✅ [弹幕集数] 匹配成功！第 " + currentEpisode + " 集，集名原文=" + parts[0]);
+            break;
+        }
+        // 最后一集仍未匹配，打印第一集信息便于排查
+        if (i == episodes.length - 1) {
+            Proxy.log("⚠️ [弹幕集数] 全部 " + episodes.length + " 集均未匹配，cleanId=" + cleanId + " | 第1集epUrl=" + (episodes[0].split("\\$").length > 1 ? episodes[0].split("\\$")[episodes[0].split("\\$").length - 1] : "无"));
+        }
+    }
+}
 
             // ✅ 恢复弹幕数据到 varPool
             if (!TextUtils.isEmpty(danmuTitle)) varPool.put("vod_name", danmuTitle);
