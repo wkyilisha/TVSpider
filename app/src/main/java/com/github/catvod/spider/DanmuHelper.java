@@ -57,7 +57,9 @@ public class DanmuHelper {
             }
 
             // 获取视频 URL（可选逻辑，不依赖外部 url）
+            SpiderDebug.log("🎯 [弹幕] title=" + title + " | episode=" + episodeNum);
             String videoUrl = searchVideoUrl(title, episodeNum);
+            SpiderDebug.log("🔗 [弹幕] searchVideoUrl结果=" + (videoUrl.isEmpty() ? "空！将不搜索弹幕" : videoUrl));
 
             // 获取弹幕并转换为 XML
             String xmlContent = "";
@@ -68,7 +70,7 @@ public class DanmuHelper {
             // 弹幕为空，生成系统提示
             if (xmlContent.isEmpty()) {
                 xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><i>"
-                        + "<d p=\"0,1,25,16777215\">[代理] " + escapeXml(title) + " 弹幕加载完成</d>"
+                        + "<d p=\"0,1,25,16777215,0,0,0,0\">[代理] " + escapeXml(title) + " 弹幕加载完成</d>"
                         + "</i>";
             }
 
@@ -123,8 +125,10 @@ public class DanmuHelper {
                     }
                 }
             }
-        } catch (Exception ignored) {}
-        return "";
+        } catch (Exception e) {
+          SpiderDebug.log("❌ [弹幕360搜索失败] " + e.getMessage());
+}
+return "";
     }
 
     /**
@@ -139,6 +143,7 @@ public class DanmuHelper {
      * ✅ 修复：增强 JSON 解析兼容性，防止 NPE
      */
     private static String fetchAndConvert(String videoUrl) {
+        SpiderDebug.log("🔍 [弹幕搜索] 开始搜索，videoUrl=" + videoUrl);
         for (String source : DANMU_SOURCES) {
             try {
                 String api = source.replace("{url}", URLEncoder.encode(videoUrl, "UTF-8"));
@@ -165,7 +170,7 @@ public class DanmuHelper {
                 if (danmuku == null && json.has("data") && json.get("data").isJsonArray()) {
                     danmuku = json.getAsJsonArray("data");
                 }
-
+                SpiderDebug.log("📦 [弹幕解析] source=" + source + " | danmuku条数=" + (danmuku != null ? danmuku.size() : 0));
                 if (danmuku != null && danmuku.size() > 0) {
                     StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?><i>\n");
                     for (JsonElement d : danmuku) {
@@ -179,14 +184,16 @@ public class DanmuHelper {
 
                         String time = item.get(0).getAsString();
                         String color = item.get(3).getAsString();
-                        xml.append(String.format("<d p=\"%s,1,25,%s\">%s</d>\n",
-                                time, color, escapeXml(content)));
+                        long ts = System.currentTimeMillis() / 1000;
+                        xml.append(String.format("<d p=\"%s,1,25,%s,%d,0,0,0\">%s</d>\n",
+                        time, color, ts, escapeXml(content)));
                     }
                     xml.append("</i>");
                     return xml.toString();
                 }
             } catch (Exception e) {
                 SpiderDebug.log(e);  // 不要静默忽略
+                SpiderDebug.log("❌ [弹幕源失败] source=" + source + " | error=" + e.getMessage()); // ← 新增这行
             }
         }
         return "";
