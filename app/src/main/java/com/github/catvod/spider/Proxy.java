@@ -38,7 +38,25 @@ public class Proxy extends Spider {
                         if (req == null) continue;
 
                         try (OutputStream out = client.getOutputStream()) {
-                            if (req.contains("/?clean")) {
+                            if (req.contains("/danmu")) {
+                                String query = req.contains("?") ? req.split("\\?")[1].split(" ")[0] : "";
+                                Map<String, String> qparams = new HashMap<>();
+                                for (String kv : query.split("&")) {
+                                    String[] pair = kv.split("=", 2);
+                                    if (pair.length == 2) {
+                                        try { qparams.put(pair[0], URLDecoder.decode(pair[1], "UTF-8")); } catch (Exception ignored) {}
+                                    }
+                                }
+                                log("📨 [弹幕入口] 收到请求 title=" + qparams.get("title") + " | episode=" + qparams.get("episode"));
+                                Object[] danmuResult = DanmuHelper.getDanmuResponse(qparams);
+                                byte[] body = new byte[0];
+                                if (danmuResult.length >= 3 && danmuResult[2] instanceof InputStream) {
+                                    body = ((InputStream) danmuResult[2]).readAllBytes();
+                                }
+                                out.write("HTTP/1.1 200 OK\r\nContent-Type: application/xml; charset=utf-8\r\nConnection: close\r\n\r\n".getBytes());
+                                out.write(body);
+                                out.flush();
+                            } else if (req.contains("/?clean")) {
                                 sb.setLength(0);
                                 sb.append("<div style='color:red;'>--- 日誌已手動清空 ---</div>");
                                 out.write("HTTP/1.1 200 OK\r\n\r\nOK".getBytes());
