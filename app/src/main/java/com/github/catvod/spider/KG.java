@@ -13,6 +13,7 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import java.util.List;
 import java.net.URLEncoder;
+import java.util.Map;
 import java.util.*;
 
 public class KG extends Spider {
@@ -560,9 +561,9 @@ if (!TextUtils.isEmpty(danmuPlayUrl)) {
                 String _danmuEp1 = varPool.get("vod_episode");
                 if (!TextUtils.isEmpty(_danmuTitle1)) {
                     try {
-                        String _danmakuUrl1 = Proxy.getUrl() + "?do=danmu"
-                                + "&title=" + URLEncoder.encode(_danmuTitle1, "UTF-8")
-                                + "&episode=" + URLEncoder.encode(TextUtils.isEmpty(_danmuEp1) ? "1" : _danmuEp1, "UTF-8");
+                        String _danmakuUrl1 = "http://127.0.0.1:10086/danmu"
+        + "?title=" + URLEncoder.encode(_danmuTitle1, "UTF-8")
+        + "&episode=" + URLEncoder.encode(TextUtils.isEmpty(_danmuEp1) ? "1" : _danmuEp1, "UTF-8");
                         res.put("danmaku", _danmakuUrl1);
                         Proxy.log("<b style='color:#2ecc71;'>💬 [弹幕] 已注入 danmaku=" + _danmakuUrl1 + "</b>");
                     } catch (Exception e) {
@@ -661,9 +662,9 @@ if (vars != null) {
             String _danmuEp2 = varPool.get("vod_episode");
             if (!TextUtils.isEmpty(_danmuTitle2)) {
                 try {
-                    String _danmakuUrl2 = Proxy.getUrl() + "?do=danmu"
-                            + "&title=" + URLEncoder.encode(_danmuTitle2, "UTF-8")
-                            + "&episode=" + URLEncoder.encode(TextUtils.isEmpty(_danmuEp2) ? "1" : _danmuEp2, "UTF-8");
+                    String _danmakuUrl2 = "http://127.0.0.1:10086/danmu"
+        + "?title=" + URLEncoder.encode(_danmuTitle2, "UTF-8")
+        + "&episode=" + URLEncoder.encode(TextUtils.isEmpty(_danmuEp2) ? "1" : _danmuEp2, "UTF-8");
                     resJson.put("danmaku", _danmakuUrl2);
                     Proxy.log("<b style='color:#2ecc71;'>💬 [弹幕] 已注入 danmaku=" + _danmakuUrl2 + "</b>");
                 } catch (Exception e) {
