@@ -555,6 +555,20 @@ if (!TextUtils.isEmpty(danmuPlayUrl)) {
                 res.put("parse", isStream ? 0 : 1);
                 res.put("url", originalUrl);
                 res.put("header", getPlayHeaders(play));
+                // ✅ 注入弹幕
+                String _danmuTitle1 = varPool.get("vod_name");
+                String _danmuEp1 = varPool.get("vod_episode");
+                if (!TextUtils.isEmpty(_danmuTitle1)) {
+                    try {
+                        String _danmakuUrl1 = Proxy.getUrl() + "?do=danmu"
+                                + "&title=" + URLEncoder.encode(_danmuTitle1, "UTF-8")
+                                + "&episode=" + URLEncoder.encode(TextUtils.isEmpty(_danmuEp1) ? "1" : _danmuEp1, "UTF-8");
+                        res.put("danmaku", _danmakuUrl1);
+                        Proxy.log("<b style='color:#2ecc71;'>💬 [弹幕] 已注入 danmaku=" + _danmakuUrl1 + "</b>");
+                    } catch (Exception e) {
+                        Proxy.log("<b style='color:red;'>❌ [弹幕] 注入失败: " + e.getMessage() + "</b>");
+                    }
+                }
                 Proxy.log("<b style='color:#2ecc71;'>🚀 [Direct] 無解析步驟，直接推送原始地址</b>");
                 return res.toString();
             }
@@ -642,6 +656,20 @@ if (vars != null) {
             resJson.put("parse", pValue);
             resJson.put("url", (pValue == 0) ? finalUrl : originalUrl);
             resJson.put("header", getPlayHeaders(play));
+            // ✅ 注入弹幕
+            String _danmuTitle2 = varPool.get("vod_name");
+            String _danmuEp2 = varPool.get("vod_episode");
+            if (!TextUtils.isEmpty(_danmuTitle2)) {
+                try {
+                    String _danmakuUrl2 = Proxy.getUrl() + "?do=danmu"
+                            + "&title=" + URLEncoder.encode(_danmuTitle2, "UTF-8")
+                            + "&episode=" + URLEncoder.encode(TextUtils.isEmpty(_danmuEp2) ? "1" : _danmuEp2, "UTF-8");
+                    resJson.put("danmaku", _danmakuUrl2);
+                    Proxy.log("<b style='color:#2ecc71;'>💬 [弹幕] 已注入 danmaku=" + _danmakuUrl2 + "</b>");
+                } catch (Exception e) {
+                    Proxy.log("<b style='color:red;'>❌ [弹幕] 注入失败: " + e.getMessage() + "</b>");
+                }
+            }
 
             // 🚀 最終推送 JSON 日誌
             String finalPush = resJson.toString();
