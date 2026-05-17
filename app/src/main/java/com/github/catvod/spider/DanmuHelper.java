@@ -57,9 +57,9 @@ public class DanmuHelper {
             }
 
             // 获取视频 URL（可选逻辑，不依赖外部 url）
-            SpiderDebug.log("🎯 [弹幕] title=" + title + " | episode=" + episodeNum);
+            Proxy.log("🎯 [弹幕] title=" + title + " | episode=" + episodeNum);
             String videoUrl = searchVideoUrl(title, episodeNum);
-            SpiderDebug.log("🔗 [弹幕] searchVideoUrl结果=" + (videoUrl.isEmpty() ? "空！将不搜索弹幕" : videoUrl));
+            Proxy.log("🔗 [弹幕] searchVideoUrl结果=" + (videoUrl.isEmpty() ? "空！将不搜索弹幕" : videoUrl));
 
             // 获取弹幕并转换为 XML
             String xmlContent = "";
@@ -80,7 +80,7 @@ public class DanmuHelper {
                     new ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8))
             };
         } catch (Exception e) {
-            SpiderDebug.log(e);
+            Proxy.log("❌ [弹幕总异常] " + e.getMessage());
             Map<String, String> headers = new HashMap<>();
             headers.put("Content-Type", "text/plain");
             return new Object[]{
@@ -120,7 +120,7 @@ public class DanmuHelper {
                 }
             }
         } catch (Exception e) {
-          SpiderDebug.log("❌ [弹幕360搜索失败] " + e.getMessage());
+          Proxy.log("❌ [弹幕360搜索失败] " + e.getMessage());
 }
 return "";
     }
@@ -137,7 +137,7 @@ return "";
      * ✅ 修复：增强 JSON 解析兼容性，防止 NPE
      */
     private static String fetchAndConvert(String videoUrl) {
-        SpiderDebug.log("🔍 [弹幕搜索] 开始搜索，videoUrl=" + videoUrl);
+        Proxy.log("🔍 [弹幕搜索] 开始搜索，videoUrl=" + videoUrl);
         for (String source : DANMU_SOURCES) {
             try {
                 String api = source.replace("{url}", URLEncoder.encode(videoUrl, "UTF-8"));
@@ -164,7 +164,7 @@ return "";
                 if (danmuku == null && json.has("data") && json.get("data").isJsonArray()) {
                     danmuku = json.getAsJsonArray("data");
                 }
-                SpiderDebug.log("📦 [弹幕解析] source=" + source + " | danmuku条数=" + (danmuku != null ? danmuku.size() : 0));
+                Proxy.log("📦 [弹幕解析] source=" + source + " | danmuku条数=" + (danmuku != null ? danmuku.size() : 0));
                 if (danmuku != null && danmuku.size() > 0) {
                     StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?><i>\n");
                     for (JsonElement d : danmuku) {
@@ -186,8 +186,7 @@ return "";
                     return xml.toString();
                 }
             } catch (Exception e) {
-                SpiderDebug.log(e);  // 不要静默忽略
-                SpiderDebug.log("❌ [弹幕源失败] source=" + source + " | error=" + e.getMessage()); // ← 新增这行
+                Proxy.log("❌ [弹幕源失败] source=" + source + " | error=" + e.getMessage()); // ← 新增这行
             }
         }
         return "";
