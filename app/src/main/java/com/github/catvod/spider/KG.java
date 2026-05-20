@@ -562,7 +562,7 @@ if (!TextUtils.isEmpty(danmuPlayUrl)) {
                 // ✅ 注入弹幕
                 String _danmuTitle1 = varPool.get("vod_name");
                 String _danmuEp1 = varPool.get("vod_episode");
-                if (!TextUtils.isEmpty(_danmuTitle1)) {
+                if (rule.optBoolean("danmaku", false) && !TextUtils.isEmpty(_danmuTitle1)) {
                     try {
                         String _danmakuUrl1 = "http://127.0.0.1:10086/danmu"
         + "?title=" + URLEncoder.encode(_danmuTitle1, "UTF-8")
@@ -663,7 +663,7 @@ if (vars != null) {
             // ✅ 注入弹幕
             String _danmuTitle2 = varPool.get("vod_name");
             String _danmuEp2 = varPool.get("vod_episode");
-            if (!TextUtils.isEmpty(_danmuTitle2)) {
+            if (rule.optBoolean("danmaku", false) && !TextUtils.isEmpty(_danmuTitle2)) {
                 try {
                     String _danmakuUrl2 = "http://127.0.0.1:10086/danmu"
         + "?title=" + URLEncoder.encode(_danmuTitle2, "UTF-8")
