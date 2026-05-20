@@ -898,6 +898,7 @@ public String homeContent(boolean filter) {
 
         JSONObject result = new JSONObject();
         result.put("class", resultClasses);
+        result.put("list", new JSONArray());
 
         // 如果規則裡有篩選數據(filters)，也可以在這裡放進去
         if (rule.has("filters")) {
