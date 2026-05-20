@@ -615,18 +615,26 @@ if (vars != null) {
                         String vRule = vars.optString(k).trim(); // 去掉可能存在的空格
                         String val = "";
 
-                        // 🚀 1. 增強型 JSON 提取
-                        if (vRule.startsWith("json:")) {
-                            try {
-                                String keyName = vRule.substring(5).trim(); // 拿到 "url"
-                                JSONObject jsonObj = new JSONObject(html.trim());
-                                val = jsonObj.optString(keyName);
-                            } catch (Exception e) {
-                                Proxy.log("   └─ <b style='color:red;'>❌ JSON 解析失敗:</b> " + e.getMessage());
-                                val = "";
+                        String[] vRules = vRule.split("\\|\\|");
+                        for (String singleRule : vRules) {
+                            singleRule = singleRule.trim();
+                            if (singleRule.startsWith("json:")) {
+                                try {
+                                    String keyName = singleRule.substring(5).trim();
+                                    JSONObject jsonObj = new JSONObject(html.trim());
+                                    val = jsonObj.optString(keyName);
+                                } catch (Exception e) {
+                                    val = "";
+                                }
+                            } else {
+                                val = KaiGeEngine.doExtract(html, singleRule, this.siteUrl).value;
                             }
-                        } else {
-                            val = KaiGeEngine.doExtract(html, vRule, this.siteUrl).value;
+                            if (!TextUtils.isEmpty(val)) {
+                                Proxy.log("    └─ <span style='color:#f1c40f;'>[提取成功]</span> 命中規則: " + singleRule);
+                                break;
+                            } else {
+                                Proxy.log("    └─ <span style='color:#95a5a6;'>⚠️ [規則未命中]</span> 嘗試下一條: " + singleRule);
+                            }
                         }
 
                         // 🚀 2. 暴力清洗提取到的數據
@@ -737,7 +745,7 @@ private String parseList(String html, String pg, boolean isSearch) {
                     }
 
                     vod.put("vod_name", vName);
-                    if (!TextUtils.isEmpty(vPic) && vPic.startsWith("//")) vPic = "http:" + vPic;
+                    vPic = fixPicUrl(vPic);
                     vod.put("vod_pic",     vPic);
                     vod.put("vod_remarks", vRemarks);
 
@@ -793,7 +801,7 @@ private String parseList(String html, String pg, boolean isSearch) {
 
                 String vPic = extract(item, picRule);
                 if (TextUtils.isEmpty(vPic)) vPic = smartVod.optString("vod_pic");
-                if (!TextUtils.isEmpty(vPic) && vPic.startsWith("//")) vPic = "http:" + vPic;
+                vPic = fixPicUrl(vPic);
                 vod.put("vod_pic", vPic);
 
                 String vRemarks = extract(item, remarkRule);
@@ -814,7 +822,14 @@ private String stripJson(String rule) {
     if (TextUtils.isEmpty(rule)) return "";
     return rule.toLowerCase().startsWith("json:") ? rule.substring(5).trim() : rule.trim();
 }
-
+private String fixPicUrl(String pic) {
+    if (TextUtils.isEmpty(pic)) return pic;
+    if (pic.startsWith("http://") || pic.startsWith("https://")) return pic;
+    if (pic.startsWith("//")) return "http:" + pic;
+    // 有图片前缀用前缀，没有用站点域名
+    String picHost = rule.optString("pic_host", this.siteUrl);
+    return picHost + (pic.startsWith("/") ? "" : "/") + pic;
+}
 private String extract(Object root, String ruleStr) {
         try {
             if (TextUtils.isEmpty(ruleStr) || root == null) return "";
