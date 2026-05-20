@@ -72,7 +72,76 @@ private void logCheck(String title, String html, boolean showSource) {
             }
 
             this.rule = new JSONObject(json);
-            // 🚀 從配置中自動提取域名
+            String indexUrl = rule.optString("index_url", "");
+            if (!TextUtils.isEmpty(indexUrl)) {
+                try {
+                    logger("🔍 [发布页] 正在请求: " + indexUrl);
+                    Map<String, String> indexHeaders = new HashMap<>();
+                    indexHeaders.put("User-Agent", rule.optString("ua", "Mozilla/5.0"));
+                    indexHeaders.put("Referer", "");
+
+                    // ✅ 情况一：先尝试跟随 302 跳转
+                    String realSite = "";
+                    try {
+                        Map<String, List<String>> locationHeaders = OkHttp.getLocationHeader(indexUrl, indexHeaders);
+                        String realLocation = OkHttp.getLocation(locationHeaders);
+                        if (!TextUtils.isEmpty(realLocation) && realLocation.startsWith("http")) {
+                            java.net.URL realUrl = new java.net.URL(realLocation);
+                            realSite = realUrl.getProtocol() + "://" + realUrl.getHost();
+                            logger("✅ [发布页] 302跳转检测到真实域名: " + realSite);
+                        }
+                    } catch (Exception ignored) {}
+
+                    // ✅ 情况二：302 没拿到，尝试解析 HTML 提取链接
+                    if (TextUtils.isEmpty(realSite)) {
+                        try {
+                            OkResult indexRes = KaiGeNet.smartRequest(indexUrl, "get", indexUrl, null, indexHeaders);
+                            String indexHtml = indexRes.getBody();
+                            if (!TextUtils.isEmpty(indexHtml)) {
+                                String indexRule = rule.optString("index_rule", "");
+                                String extracted = "";
+                                if (!TextUtils.isEmpty(indexRule)) {
+                                    extracted = KaiGeEngine.doExtract(indexHtml, indexRule, "").value;
+                                    logger("🔍 [发布页] 使用自定义规则提取: " + extracted);
+                                } else {
+                                    String indexHost = new java.net.URL(indexUrl).getHost();
+                                    Document indexDoc = Jsoup.parse(indexHtml);
+                                    for (Element a : indexDoc.select("a[href]")) {
+                                        String href = a.attr("abs:href");
+                                        if (!TextUtils.isEmpty(href) && href.startsWith("http")) {
+                                            String hrefHost = new java.net.URL(href).getHost();
+                                            if (!hrefHost.equals(indexHost)) {
+                                                extracted = href;
+                                                logger("🔍 [发布页] 智能识别到跳转链接: " + extracted);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                if (!TextUtils.isEmpty(extracted) && extracted.startsWith("http")) {
+                                    java.net.URL realUrl = new java.net.URL(extracted);
+                                    realSite = realUrl.getProtocol() + "://" + realUrl.getHost();
+                                    logger("✅ [发布页] HTML提取真实域名: " + realSite);
+                                }
+                            }
+                        } catch (Exception ignored) {}
+                    }
+
+                    // ✅ 更新域名
+                    if (!TextUtils.isEmpty(realSite)) {
+                        rule.put("site_url", realSite);
+                        rule.put("host", realSite);
+                        logger("🌐 [发布页] 域名已更新为: " + realSite);
+                    } else {
+                        logger("⚠️ [发布页] 两种方式均未获取到域名，保持原域名");
+                    }
+
+                } catch (Exception ex) {
+                    logger("⚠️ [发布页] 处理失败，保持原域名: " + ex.getMessage());
+                }
+            }
+
+            // 🚀 從配置中自動提取域名（必须在 index_url 处理之后）
             this.siteUrl = rule.optString("site_url", rule.optString("host", ""));
 
             logger("✅ [系統] 站點配置加載完成: " + rule.optString("site_name"));
