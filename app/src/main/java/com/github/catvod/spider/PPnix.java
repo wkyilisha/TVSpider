@@ -376,15 +376,16 @@ public class PPnix extends Spider {
     }
 
     // ──────────────────────────────────────────────
-    // 播放（方案一：强制强制注入 Origin 保险版）
+    // 播放（严格对齐 FongMi SPIDER.md 规范版）
     // ──────────────────────────────────────────────
 
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
         try {
+            // 1. 直连还原基础 M3U8 链接
             String m3u8Url = id.startsWith("http") ? id : HOST + id;
 
-            // 1. 构建严苛的 Referer
+            // 2. 动态构建严苛的 Referer
             String referer = HOST + "/";
             Matcher mInfo = Pattern.compile("/info/m3u8/(\\d+)/").matcher(id);
             if (mInfo.find()) {
@@ -392,47 +393,45 @@ public class PPnix extends Spider {
                 referer = HOST + "/cn/" + categoryType + "/" + mInfo.group(1) + ".html";
             }
 
-            logger("▶️ [播放发流] 目标 URL: " + m3u8Url);
-            logger("▶️ [播放发流] 强制注入 Origin: " + HOST);
+            logger("▶️ [FongMi发流] 目标 URL: " + m3u8Url);
 
-            // 2. 组织高还原度的直连播放头（标准 JSON 注入）
-            JSONObject headers = new JSONObject();
-            headers.put("User-Agent", UA);
-            headers.put("Referer", referer);
-            headers.put("Origin", HOST);       // 🔥 【核心】明确塞入大写 Origin 
-            headers.put("origin", HOST);       // 🔥 【容错】防止部分播放器内核强行转小写，小写也塞一个
-            headers.put("Accept", "*/*");
-            headers.put("Accept-Language", "zh-CN,zh;q=0.9");
+            // 3. 构造符合抓包与反爬要求的请求头 JSONObject
+            JSONObject headersObj = new JSONObject();
+            headersObj.put("User-Agent", UA);
+            headersObj.put("Referer", referer);
+            headersObj.put("Origin", HOST);  // 🔍 注入必须的 Origin
+            headersObj.put("origin", HOST);  // 🔍 小写容错
+            headersObj.put("Accept", "*/*");
+            headersObj.put("Accept-Language", "zh-CN,zh;q=0.9");
 
-            // 3. 全量拉取本地系统 CookieManager 的数据注入播放头
+            // 4. 从本地 CookieManager 获取完整的破盾 Cookie
             try {
                 String completeCookie = CookieManager.getInstance().getCookie(HOST);
                 if (!TextUtils.isEmpty(completeCookie)) {
-                    headers.put("Cookie", completeCookie);
-                    logger("🍪 [播放注入] 成功提取并追加全量 Cookie: " + completeCookie);
+                    headersObj.put("Cookie", completeCookie); // 🔍 注入必须的 Cookie
+                    headersObj.put("cookie", completeCookie); // 🔍 小写容错
+                    logger("🍪 [FongMi注入] 捕获到全量 Cookie: " + completeCookie);
                     
-                    // 级联同步至物理请求节点防止硬解底层丢失上下文
+                    // 顺手刷入底盘内存
                     java.net.URL pUrl = new java.net.URL(m3u8Url);
                     String playHost = pUrl.getProtocol() + "://" + pUrl.getHost();
                     CookieManager.getInstance().setCookie(playHost, completeCookie);
                     CookieManager.getInstance().flush();
                 } else {
-                    logger("⚠️ [播放注入] 警告：CookieManager 中暂无可用 Cookie！");
+                    logger("⚠️ [FongMi注入] 警告：系统未发现可用 Cookie！");
                 }
             } catch (Exception ce) {
-                logger("🚨 [播放注入] Cookie 捕获失败: " + ce.getMessage());
+                logger("🚨 [FongMi注入] Cookie 获取异常: " + ce.getMessage());
             }
 
-            // 4. 🔥【终极保底】如果壳子底层的播放内核硬解过滤掉了自定义 Header，
-            // 那么我们将关键的 Origin 和 Referer 挂载到 URL 的扩展参数（形如 url@Origin=xxx&Referer=xxx）
-            // 很多内置的默认播放组件（如 ExoPlayer 配置类）能够切片解析这种标准的带有 @ 符号的附加头
-            String exHeaderParam = "@Origin=" + HOST + "&origin=" + HOST + "&Referer=" + referer + "&User-Agent=" + java.net.URLEncoder.encode(UA, "UTF-8");
-            String finalPlayUrl = m3u8Url + exHeaderParam;
-
+            // 5. 严格按照 SPIDER.md 规范组装返回 JSON
             JSONObject result = new JSONObject();
-            result.put("parse", 0); 
-            result.put("url", finalPlayUrl); // 传出带有双重注入头参数的 URL
-            result.put("header", headers);   // 同时传出标准的 json header
+            result.put("parse", 0);          // 0 代表点击直连，不走二次解析
+            result.put("url", m3u8Url);      // 干净的原始 m3u8 链接
+            
+            // 🔥【终极修正】FongMi 规范：header 的值必须是 String，不能是 JSONObject！
+            result.put("header", headersObj.toString()); 
+            
             return result.toString();
         } catch (Exception e) {
             logger("🚨 [播放异常] " + e.getMessage());
