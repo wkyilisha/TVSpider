@@ -376,7 +376,7 @@ public class PPnix extends Spider {
     }
 
     // ──────────────────────────────────────────────
-    // 播放（严格对齐 FongMi SPIDER.md 规范版）
+    // 播放（完整优化版 - 包含 Origin 请求头）
     // ──────────────────────────────────────────────
 
     @Override
@@ -393,35 +393,46 @@ public class PPnix extends Spider {
                 referer = HOST + "/cn/" + categoryType + "/" + mInfo.group(1) + ".html";
             }
 
-            logger("▶️ [FongMi发流] 目标 URL: " + m3u8Url);
+            logger("▶️ [播放] 目标 URL: " + m3u8Url);
+            logger("🔗 [播放] Referer: " + referer);
 
-            // 3. 构造符合抓包与反爬要求的请求头 JSONObject
+            // 3. 构造完整的请求头
             JSONObject headersObj = new JSONObject();
+            
+            // 基础请求头
             headersObj.put("User-Agent", UA);
-            headersObj.put("Referer", referer);
-            headersObj.put("Origin", HOST);  // 🔍 注入必须的 Origin
-            headersObj.put("origin", HOST);  // 🔍 小写容错
             headersObj.put("Accept", "*/*");
             headersObj.put("Accept-Language", "zh-CN,zh;q=0.9");
-
-            // 4. 从本地 CookieManager 获取完整的破盾 Cookie
+            headersObj.put("Accept-Encoding", "gzip, deflate, br");
+            headersObj.put("Connection", "keep-alive");
+            headersObj.put("Cache-Control", "no-cache");
+            
+            // 关键反爬请求头 - Origin 在这里添加
+            headersObj.put("Referer", referer);
+            headersObj.put("Origin", HOST);           // 标准写法: https://www.ppnix.com
+            headersObj.put("origin", HOST);            // 小写容错
+            headersObj.put("Sec-Fetch-Site", "same-origin");
+            headersObj.put("Sec-Fetch-Mode", "cors");
+            headersObj.put("Sec-Fetch-Dest", "empty");
+            
+            // 4. 从 CookieManager 获取完整的破盾 Cookie
             try {
                 String completeCookie = CookieManager.getInstance().getCookie(HOST);
                 if (!TextUtils.isEmpty(completeCookie)) {
-                    headersObj.put("Cookie", completeCookie); // 🔍 注入必须的 Cookie
-                    headersObj.put("cookie", completeCookie); // 🔍 小写容错
-                    logger("🍪 [FongMi注入] 捕获到全量 Cookie: " + completeCookie);
+                    headersObj.put("Cookie", completeCookie);
+                    headersObj.put("cookie", completeCookie);
+                    logger("🍪 [播放] Cookie 已注入");
                     
-                    // 顺手刷入底盘内存
+                    // 同步 Cookie 到播放域名
                     java.net.URL pUrl = new java.net.URL(m3u8Url);
                     String playHost = pUrl.getProtocol() + "://" + pUrl.getHost();
                     CookieManager.getInstance().setCookie(playHost, completeCookie);
                     CookieManager.getInstance().flush();
                 } else {
-                    logger("⚠️ [FongMi注入] 警告：系统未发现可用 Cookie！");
+                    logger("⚠️ [播放] 未检测到 Cookie");
                 }
             } catch (Exception ce) {
-                logger("🚨 [FongMi注入] Cookie 获取异常: " + ce.getMessage());
+                logger("🚨 [播放] Cookie 获取异常: " + ce.getMessage());
             }
 
             // 5. 严格按照 SPIDER.md 规范组装返回 JSON
@@ -429,12 +440,17 @@ public class PPnix extends Spider {
             result.put("parse", 0);          // 0 代表点击直连，不走二次解析
             result.put("url", m3u8Url);      // 干净的原始 m3u8 链接
             
-            // 🔥【终极修正】FongMi 规范：header 的值必须是 String，不能是 JSONObject！
-            result.put("header", headersObj.toString()); 
+            // 🔥 header 必须是 String 类型（FongMi 规范）
+            result.put("header", headersObj.toString());
+            
+            // 调试日志：打印实际发送的请求头
+            logger("📋 [播放请求头] " + headersObj.toString());
             
             return result.toString();
+            
         } catch (Exception e) {
             logger("🚨 [播放异常] " + e.getMessage());
+            e.printStackTrace();
             return "{}";
         }
     }
