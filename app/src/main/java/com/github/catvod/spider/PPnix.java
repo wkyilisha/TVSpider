@@ -87,20 +87,17 @@ public class PPnix extends Spider {
     public void init(Context context, String extend) {
         logger("🚀 [PPnix] 初始化...");
 
-        // 先尝试直接注入已有 Cookie（上次 WebView 留下的）
         if (injectCFCookie()) {
             logger("✅ [PPnix] 已有 CF Cookie，跳过 WebView");
             return;
         }
 
-        // 普通请求测试是否被 CF 拦截
         String testHtml = get(HOST, "");
         if (!isCFBlocked(testHtml)) {
             logger("✅ [PPnix] 无需 CF 验证，直接通过");
             return;
         }
 
-        // 需要 CF 验证，弹出 WebView
         logger("⚠️ [PPnix] 检测到 CF 盾，弹出 WebView 验证...");
         Init.run(this::showCFWebView);
     }
@@ -119,14 +116,12 @@ public class PPnix extends Spider {
             settings.setLoadWithOverviewMode(true);
             settings.setUseWideViewPort(true);
 
-            // 同步系统 CookieManager
             CookieManager.getInstance().setAcceptCookie(true);
             CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
             webView.setWebViewClient(new WebViewClient() {
                 @Override
                 public void onPageFinished(WebView view, String url) {
-                    // 每次页面加载完检查是否已拿到 cf_clearance
                     if (injectCFCookie()) {
                         logger("✅ [CF WebView] 自动通过 CF 验证");
                         Init.run(() -> dismissCFDialog());
@@ -146,17 +141,14 @@ public class PPnix extends Spider {
                 .setTitle("请完成 CF 人机验证")
                 .setView(frame)
                 .setPositiveButton("完成", (d, w) -> {
-                    // 手动点完成时强制提取
                     injectCFCookie();
                     d.dismiss();
                 })
                 .setOnDismissListener(d -> {
-                    // 弹窗关闭时销毁 WebView 释放内存
                     try { webView.destroy(); } catch (Exception ignored) {}
                 })
                 .create();
 
-            // 透明背景，让 WebView 占满弹窗
             cfDialog.show();
             cfDialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             cfDialog.getWindow().setLayout(
@@ -214,7 +206,7 @@ public class PPnix extends Spider {
     public String categoryContent(String tid, String pg, boolean filter, HashMap<String, String> extend) {
         try {
             int page      = Integer.parseInt(pg);
-            int pageIndex = page - 1; // 网站页码从 0 开始
+            int pageIndex = page - 1;
             String url    = HOST + "/cn/" + tid + "/---" + pageIndex + "-.html";
 
             logger("📂 [分类] " + tid + " 第" + page + "页 → " + url);
@@ -276,7 +268,6 @@ public class PPnix extends Spider {
 
             Document doc = Jsoup.parse(html);
 
-            // ── 标题 & 年份 ──
             String name = "", year = "";
             Element titleElem = doc.selectFirst("h1.product-title");
             if (titleElem != null) {
@@ -290,7 +281,6 @@ public class PPnix extends Spider {
                 }
             }
 
-            // ── 封面 ──
             String pic = "";
             Element picElem = doc.selectFirst(".product-header img.thumb");
             if (picElem != null) {
@@ -298,7 +288,6 @@ public class PPnix extends Spider {
                 if (pic.startsWith("/")) pic = HOST + pic;
             }
 
-            // ── 导演 / 主演 / 地区 / 简介 ──
             String director = extractLinks(doc, "导演");
             String actor    = extractLinks(doc, "主演");
             String area     = extractLinks(doc, "国家");
@@ -306,7 +295,6 @@ public class PPnix extends Spider {
             Element descElem = doc.selectFirst(".product-excerpt:contains(简介) span");
             if (descElem != null) content = descElem.text().trim();
 
-            // ── 从 script 提取 infoid 和集数数组 ──
             String scriptText = "";
             for (Element script : doc.select("script")) {
                 String s = script.html();
@@ -333,7 +321,6 @@ public class PPnix extends Spider {
                 }
             }
 
-            // ── 构建播放列表 ──
             String playFrom = "";
             String playUrl  = "";
             if (!TextUtils.isEmpty(infoid) && episodes.length > 0) {
@@ -389,7 +376,7 @@ public class PPnix extends Spider {
     }
 
     // ──────────────────────────────────────────────
-    // 播放（方案一：标准注入订正版 + Origin 支持）
+    // 播放（方案一：强制强制注入 Origin 保险版）
     // ──────────────────────────────────────────────
 
     @Override
@@ -397,7 +384,7 @@ public class PPnix extends Spider {
         try {
             String m3u8Url = id.startsWith("http") ? id : HOST + id;
 
-            // 构建严苛的 Referer
+            // 1. 构建严苛的 Referer
             String referer = HOST + "/";
             Matcher mInfo = Pattern.compile("/info/m3u8/(\\d+)/").matcher(id);
             if (mInfo.find()) {
@@ -406,17 +393,18 @@ public class PPnix extends Spider {
             }
 
             logger("▶️ [播放发流] 目标 URL: " + m3u8Url);
-            logger("▶️ [播放发流] 精准 Referer: " + referer);
+            logger("▶️ [播放发流] 强制注入 Origin: " + HOST);
 
-            // 组织高还原度的直连播放头
+            // 2. 组织高还原度的直连播放头（标准 JSON 注入）
             JSONObject headers = new JSONObject();
             headers.put("User-Agent", UA);
             headers.put("Referer", referer);
-            headers.put("Origin", HOST); // 🔍【核心更新】精准添加防跨域 Origin 请求头
+            headers.put("Origin", HOST);       // 🔥 【核心】明确塞入大写 Origin 
+            headers.put("origin", HOST);       // 🔥 【容错】防止部分播放器内核强行转小写，小写也塞一个
             headers.put("Accept", "*/*");
             headers.put("Accept-Language", "zh-CN,zh;q=0.9");
 
-            // 全量拉取本地系统 CookieManager 的数据注入播放头
+            // 3. 全量拉取本地系统 CookieManager 的数据注入播放头
             try {
                 String completeCookie = CookieManager.getInstance().getCookie(HOST);
                 if (!TextUtils.isEmpty(completeCookie)) {
@@ -435,10 +423,16 @@ public class PPnix extends Spider {
                 logger("🚨 [播放注入] Cookie 捕获失败: " + ce.getMessage());
             }
 
+            // 4. 🔥【终极保底】如果壳子底层的播放内核硬解过滤掉了自定义 Header，
+            // 那么我们将关键的 Origin 和 Referer 挂载到 URL 的扩展参数（形如 url@Origin=xxx&Referer=xxx）
+            // 很多内置的默认播放组件（如 ExoPlayer 配置类）能够切片解析这种标准的带有 @ 符号的附加头
+            String exHeaderParam = "@Origin=" + HOST + "&origin=" + HOST + "&Referer=" + referer + "&User-Agent=" + java.net.URLEncoder.encode(UA, "UTF-8");
+            String finalPlayUrl = m3u8Url + exHeaderParam;
+
             JSONObject result = new JSONObject();
             result.put("parse", 0); 
-            result.put("url", m3u8Url);
-            result.put("header", headers);
+            result.put("url", finalPlayUrl); // 传出带有双重注入头参数的 URL
+            result.put("header", headers);   // 同时传出标准的 json header
             return result.toString();
         } catch (Exception e) {
             logger("🚨 [播放异常] " + e.getMessage());
