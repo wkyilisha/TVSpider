@@ -66,7 +66,7 @@ public class PPnix extends Spider {
             || html.contains("challenge-platform");
     }
 
-    /** 从 CookieManager 取出 cf_clearance 并注入 KaiGeNet */
+    /** 从 CookieManager 取出全部 Cookie 并注入 KaiGeNet */
     private boolean injectCFCookie() {
         try {
             String cookie = CookieManager.getInstance().getCookie(HOST);
@@ -337,12 +337,13 @@ public class PPnix extends Spider {
             String playFrom = "";
             String playUrl  = "";
             if (!TextUtils.isEmpty(infoid) && episodes.length > 0) {
+                String categoryType = id.contains("/movie/") ? "movie" : "tv";
                 StringBuilder sb = new StringBuilder();
                 for (int i = 0; i < episodes.length; i++) {
                     if (i > 0) sb.append("#");
                     sb.append("第").append(episodes[i]).append("集")
                       .append("$")
-                      .append("/info/m3u8/").append(infoid).append("/").append(episodes[i]).append(".m3u8");
+                      .append("/info/m3u8/").append(infoid).append("/").append(episodes[i]).append(".m3u8?type=").append(categoryType);
                 }
                 playFrom = PLAY_FROM;
                 playUrl  = sb.toString();
@@ -388,7 +389,7 @@ public class PPnix extends Spider {
     }
 
     // ──────────────────────────────────────────────
-    // 播放
+    // 播放（方案一：标准注入订正版 + Origin 支持）
     // ──────────────────────────────────────────────
 
     @Override
@@ -396,45 +397,47 @@ public class PPnix extends Spider {
         try {
             String m3u8Url = id.startsWith("http") ? id : HOST + id;
 
-            // ── 模拟 Service Worker：ipfs.ppnix.com → {1-16}.ppnix.com ──
-            java.net.URL parsed = new java.net.URL(m3u8Url);
-            String hostname = parsed.getHost();
-            if (hostname.contains("ipfs.ppnix.com")) {
-                int rand       = new Random().nextInt(16) + 1;
-                String newHost = rand + ".ppnix.com";
-                m3u8Url        = m3u8Url.replace(hostname, newHost);
-                logger("🔀 [播放] 域名替换 → " + m3u8Url);
-            }
-
-            // ── 构建 Referer：从 id 提取 infoid ──
+            // 构建严苛的 Referer
             String referer = HOST + "/";
-            Matcher mInfo  = Pattern.compile("/info/m3u8/(\\d+)/").matcher(id);
+            Matcher mInfo = Pattern.compile("/info/m3u8/(\\d+)/").matcher(id);
             if (mInfo.find()) {
-                referer = HOST + "/cn/tv/" + mInfo.group(1) + ".html";
+                String categoryType = id.contains("type=movie") ? "movie" : "tv";
+                referer = HOST + "/cn/" + categoryType + "/" + mInfo.group(1) + ".html";
             }
 
-            logger("▶️ [播放] → " + m3u8Url);
-            logger("   Referer: " + referer);
+            logger("▶️ [播放发流] 目标 URL: " + m3u8Url);
+            logger("▶️ [播放发流] 精准 Referer: " + referer);
 
-            // ── 构建播放头，注入 CF Cookie ──
+            // 组织高还原度的直连播放头
             JSONObject headers = new JSONObject();
             headers.put("User-Agent", UA);
-            headers.put("Referer",    referer);
-            headers.put("Origin",     HOST);
-            headers.put("Accept",     "*/*");
+            headers.put("Referer", referer);
+            headers.put("Origin", HOST); // 🔍【核心更新】精准添加防跨域 Origin 请求头
+            headers.put("Accept", "*/*");
+            headers.put("Accept-Language", "zh-CN,zh;q=0.9");
 
-            // 从 CookieManager 取 cf_clearance 注入播放头
+            // 全量拉取本地系统 CookieManager 的数据注入播放头
             try {
-                String cookie = CookieManager.getInstance().getCookie(HOST);
-                if (!TextUtils.isEmpty(cookie) && cookie.contains("cf_clearance")) {
-                    headers.put("Cookie", cookie);
-                    logger("🍪 [播放] Cookie注入: " + cookie);
+                String completeCookie = CookieManager.getInstance().getCookie(HOST);
+                if (!TextUtils.isEmpty(completeCookie)) {
+                    headers.put("Cookie", completeCookie);
+                    logger("🍪 [播放注入] 成功提取并追加全量 Cookie: " + completeCookie);
+                    
+                    // 级联同步至物理请求节点防止硬解底层丢失上下文
+                    java.net.URL pUrl = new java.net.URL(m3u8Url);
+                    String playHost = pUrl.getProtocol() + "://" + pUrl.getHost();
+                    CookieManager.getInstance().setCookie(playHost, completeCookie);
+                    CookieManager.getInstance().flush();
+                } else {
+                    logger("⚠️ [播放注入] 警告：CookieManager 中暂无可用 Cookie！");
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ce) {
+                logger("🚨 [播放注入] Cookie 捕获失败: " + ce.getMessage());
+            }
 
             JSONObject result = new JSONObject();
-            result.put("parse",  0);
-            result.put("url",    m3u8Url);
+            result.put("parse", 0); 
+            result.put("url", m3u8Url);
             result.put("header", headers);
             return result.toString();
         } catch (Exception e) {
@@ -466,7 +469,7 @@ public class PPnix extends Spider {
                 if (!vodId.startsWith("/")) vodId = "/" + vodId;
 
                 Element img = thumbA.selectFirst("img");
-                String pic  = img != null ? img.attr("src") : "";
+                String pic  = img != null ? (img.hasAttr("src") ? img.attr("src") : img.attr("data-src")) : "";
 
                 Element titleA = li.selectFirst("h2 a");
                 String name    = titleA != null ? titleA.text().trim() : "";
