@@ -226,31 +226,44 @@ public class Qkys extends Spider {
         headers.put("X-Requested-With", "XMLHttpRequest");
 
         try {
+            // 发起解析接口请求
             OkResult apiRes = OkHttp.post(jxHost + "/admin/mizhi_json.php", apiPayload, headers);
             String apiResp = apiRes.getBody();
 
-            // 【关键日志3】打印接口响应
             SpiderDebug.log("=== [最终响应内容] " + (apiResp.isEmpty() ? "返回体为空" : apiResp));
 
             if (!apiResp.isEmpty()) {
                 JsonObject resJson = JsonParser.parseString(apiResp).getAsJsonObject();
                 String finalUrl = "";
+                
+                // 自动识别不同的返回字段
                 if (resJson.has("url")) finalUrl = resJson.get("url").getAsString();
                 else if (resJson.has("video_url")) finalUrl = resJson.get("video_url").getAsString();
 
                 if (!finalUrl.isEmpty()) {
-                    SpiderDebug.log("=== [解析成功] " + finalUrl);
-                    return Result.get().url(finalUrl).header(headers).string();
+                    SpiderDebug.log("=== [解析成功] 准备播放: " + finalUrl);
+
+                    // --- 【核心修改 1】: 重新定义播放请求头，去掉 Referer ---
+                    Map<String, String> playHeaders = new HashMap<>();
+                    // 只给播放器传 UA，不传 Referer 和 Origin，防止播放失败
+                    playHeaders.put("User-Agent", headers.get("User-Agent")); 
+                    
+                    // 返回直链，parse(0) 代表不嗅探
+                    return Result.get().url(finalUrl).parse(0).header(playHeaders).string();
                 }
             }
+            
+            // 如果执行到这里说明 apiResp 为空或者 json 里没 url
+            SpiderDebug.log("=== [解析失败] 接口未返回有效地址，切换嗅探模式 ===");
+            return Result.get().url(playUrl).parse(1).header(headers).string();
+
         } catch (Exception e) {
-            SpiderDebug.log("=== [错误] 接口请求崩溃: " + e.getMessage());
+            // --- 【核心修改 2】: 崩溃兜底，切换 Parse 1 嗅探 ---
+            SpiderDebug.log("=== [错误] 接口请求崩溃，自动切换嗅探: " + e.getMessage());
+            // 返回原始播放页 playUrl，parse(1) 通知壳子开启 Web 嗅探
+            return Result.get().url(playUrl).parse(1).header(headers).string();
         }
-
-        return Result.get().url("").string();
-    } // 确保这个右花括号存在
-
-
+    }
 
     private int findJsonEnd(String text, int start) {
     int count = 0;
