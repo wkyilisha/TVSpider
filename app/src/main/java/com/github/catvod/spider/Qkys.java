@@ -148,48 +148,56 @@ public class Qkys extends Spider {
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         String playUrl = id.startsWith("http") ? id : host + id;
-        SpiderDebug.log("=== [1. 开始解析] 目标URL: " + playUrl);
+        SpiderDebug.log("=== [1. 开始解析] URL: " + playUrl);
 
-        // 1. 准备 Headers
         HashMap<String, String> headers = new HashMap<>();
         headers.put("User-Agent", "Mozilla/5.0 (Linux; Android 12; SKW-A0 Build/SKW-A0211011CN00MP8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/96.0.4664.104 Mobile Safari/537.36");
         headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
         headers.put("Referer", host + "/");
-        headers.put("Accept-Language", "zh-CN,zh;q=0.9");
-        headers.put("Connection", "keep-alive");
 
-        // 打印发送的 Headers (调试用)
-        SpiderDebug.log("=== [调试] UA: " + headers.get("User-Agent"));
+        // --- 第一步：获取 Cookie ---
+        SpiderDebug.log("=== [2. 第一次请求] 尝试获取 Session...");
+        OkResult res1 = OkHttp.get(playUrl, null, headers);
+        
+        // 手动从 Headers 提取 Set-Cookie
+        String cookieStr = "";
+        Map<String, List<String>> respHeaders = res1.getHeaders();
+        if (respHeaders != null && respHeaders.containsKey("set-cookie")) {
+            List<String> cookies = respHeaders.get("set-cookie");
+            StringBuilder sb = new StringBuilder();
+            for (String c : cookies) {
+                sb.append(c.split(";")[0]).append("; ");
+            }
+            cookieStr = sb.toString();
+            SpiderDebug.log("=== [调试] 成功提取 Cookie: " + cookieStr);
+        } else {
+            SpiderDebug.log("=== [警告] 第一次请求未返回 Cookie");
+        }
 
-        // 2. 第一次请求：为了拿 Cookie
-        // 注意：由于 OkResult 不支持 getConn()，我们改用 OkHttp.string 的重载方法，
-        // 或者直接观察 OkHttp 是否会自动处理 Cookie。
-        // 如果框架支持，直接请求两次即可。
-        SpiderDebug.log("=== [2. 第一次请求] 激活 Session...");
-        OkHttp.string(playUrl, headers); 
+        // --- 第二步：带上 Cookie 进行第二次请求 ---
+        if (!cookieStr.isEmpty()) {
+            headers.put("Cookie", cookieStr);
+        }
+        
+        // 关键：模拟 JS 跳转的等待时间
+        Thread.sleep(500); 
 
-        // 稍微等待，增加真实性
-        Thread.sleep(800);
-
-        // 3. 第二次请求：获取真正数据
-        SpiderDebug.log("=== [3. 第二次请求] 获取源码...");
+        SpiderDebug.log("=== [3. 第二次请求] 正在带 Cookie 访问...");
         String html = OkHttp.string(playUrl, headers);
 
-        // 4. 源码校验与打印
+        // --- 第三步：校验源码 ---
         if (html == null || !html.contains("player_aaaa")) {
-            SpiderDebug.log("=== [错误] 源码未找到 player_aaaa");
-            if (html != null && !html.trim().isEmpty()) {
-                // 修复编译报错，不使用 getConn，直接处理 html
-                String safeHtml = html.length() > 500 ? html.substring(0, 500) : html;
-                safeHtml = safeHtml.replace("<", "&lt;").replace(">", "&gt;");
-                SpiderDebug.log("=== [源码前500字] \n" + safeHtml);
+            SpiderDebug.log("=== [错误] 依然没拿到数据，准备打印源码");
+            if (html != null) {
+                String snippet = html.length() > 500 ? html.substring(0, 500) : html;
+                SpiderDebug.log("=== [源码检视] \n" + snippet.replace("<", "&lt;").replace(">", "&gt;"));
             }
             return Result.get().url("").string();
         }
 
-        SpiderDebug.log("=== [4. 源码提取成功] 长度: " + html.length());
+        SpiderDebug.log("=== [4. 源码成功] 长度: " + html.length());
 
-        // 5. 提取 JSON (这段逻辑保持之前的稳定版)
+        // --- 第四步：提取 JSON (保持之前的稳定逻辑) ---
         JsonObject pdata;
         try {
             String marker = "var player_aaaa=";
@@ -200,15 +208,14 @@ public class Qkys extends Spider {
 
             String jsonStr = html.substring(jsonStart, jsonEnd).trim();
             if (jsonStr.endsWith(";")) jsonStr = jsonStr.substring(0, jsonStr.length() - 1);
-            
             pdata = JsonParser.parseString(jsonStr).getAsJsonObject();
-            SpiderDebug.log("=== [5. 解析成功] From: " + pdata.get("from").getAsString());
+            SpiderDebug.log("=== [5. JSON提取成功]");
         } catch (Exception e) {
-            SpiderDebug.log("=== [错误] JSON 解析失败: " + e.getMessage());
+            SpiderDebug.log("=== [错误] JSON解析失败: " + e.getMessage());
             return Result.get().url("").string();
         }
 
-        // 6. 后续解析与 API 请求
+        // --- 第五步：解析中转页并请求接口 ---
         String pUrl = pdata.get("url").getAsString();
         String pFrom = pdata.get("from").getAsString();
         String pNext = pdata.has("link_next") ? pdata.get("link_next").getAsString() : "";
@@ -220,49 +227,42 @@ public class Qkys extends Spider {
                 + "&next=" + URLEncoder.encode(pNext, "UTF-8")
                 + "&data=" + URLEncoder.encode(pPlayData, "UTF-8");
 
-        SpiderDebug.log("=== [6. 中转链接] " + fullIdxLink);
-
-        // 获取中转页
+        // 中转页请求也必须带上这个 Headers 和 Cookie
         String idxHtml = OkHttp.string(fullIdxLink, headers);
         String vUrl = extractFromConfig("url", idxHtml);
         String vTime = extractFromConfig("time", idxHtml);
         String vKey = extractFromConfig("vkey", idxHtml);
 
         if (vUrl.isEmpty()) {
-            SpiderDebug.log("=== [错误] 中转页提取 vUrl 为空");
+            SpiderDebug.log("=== [错误] 中转页解析失败");
             return Result.get().url("").string();
         }
 
-        // 7. API POST
+        // --- 第六步：最终 POST ---
         Map<String, String> apiPayload = new HashMap<>();
         apiPayload.put("url", vUrl);
         apiPayload.put("time", vTime);
         apiPayload.put("vkey", vKey);
-
+        
         try {
-            // 这里也不使用 apiRes.getConn()
             OkResult apiRes = OkHttp.post(jxHost + "/admin/mizhi_json.php", apiPayload, headers);
             String apiResp = apiRes.getBody();
-            SpiderDebug.log("=== [7. API响应] " + apiResp);
+            SpiderDebug.log("=== [6. 接口响应] " + apiResp);
 
             if (apiResp != null && !apiResp.isEmpty()) {
                 JsonObject resJson = JsonParser.parseString(apiResp).getAsJsonObject();
                 String finalUrl = resJson.has("url") ? resJson.get("url").getAsString() : "";
                 if (!finalUrl.isEmpty()) {
-                    SpiderDebug.log("=== [8. 解析成功] 最终地址: " + finalUrl);
+                    SpiderDebug.log("=== [7. 解析成功] URL: " + finalUrl);
                     return Result.get().url(finalUrl).header(headers).string();
                 }
             }
         } catch (Exception e) {
-            SpiderDebug.log("=== [错误] API 请求崩溃: " + e.getMessage());
+            SpiderDebug.log("=== [错误] API请求崩溃: " + e.getMessage());
         }
 
         return Result.get().url("").string();
     }
-
-
-
-
 
 
     private int findJsonEnd(String text, int start) {
