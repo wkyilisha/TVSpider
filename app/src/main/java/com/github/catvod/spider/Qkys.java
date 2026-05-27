@@ -233,41 +233,52 @@ public class Qkys extends Spider {
                 + "&data=" + URLEncoder.encode(pPlayData, "UTF-8");
 
         // 中转页请求也必须带上这个 Headers 和 Cookie
+        // --- 1. 打印中转页请求信息 ---
+        String fullIdxLink = jxHost + "/index.php?url=" + URLEncoder.encode(pUrl, "UTF-8") + ...; // 拼接逻辑
+        SpiderDebug.log("=== [步骤6-中转页请求] URL: " + fullIdxLink);
+        
         String idxHtml = OkHttp.string(fullIdxLink, headers);
+
+        // --- 2. 打印提取出的核心变量 ---
         String vUrl = extractFromConfig("url", idxHtml);
         String vTime = extractFromConfig("time", idxHtml);
         String vKey = extractFromConfig("vkey", idxHtml);
+        SpiderDebug.log("=== [步骤7-变量提取] url=" + vUrl + ", time=" + vTime + ", vkey=" + vKey);
 
         if (vUrl.isEmpty()) {
-            SpiderDebug.log("=== [错误] 中转页解析失败");
+            SpiderDebug.log("=== [错误] 未能在中转页找到 config 参数");
             return Result.get().url("").string();
         }
 
-        // 8. 最终接口 POST 请求
+        // --- 3. 准备最终接口请求头 ---
+        headers.put("Referer", fullIdxLink); // 伪装成从中转页跳过来的
+        headers.put("Origin", jxHost);
+        headers.put("X-Requested-With", "XMLHttpRequest");
+
+        // 打印发送给接口的全部 Header
+        SpiderDebug.log("=== [调试-最终请求头] Cookie: " + headers.get("Cookie"));
+        SpiderDebug.log("=== [调试-最终请求头] Referer: " + headers.get("Referer"));
+
+        // --- 4. 最终 POST ---
         Map<String, String> apiPayload = new HashMap<>();
         apiPayload.put("url", vUrl);
         apiPayload.put("time", vTime);
         apiPayload.put("vkey", vKey);
-
+        
         try {
             OkResult apiRes = OkHttp.post(jxHost + "/admin/mizhi_json.php", apiPayload, headers);
-            String apiResp = apiRes.getBody(); // 使用 OkResult 的 getBody()
-            SpiderDebug.log("=== [6. 最终响应] " + apiResp);
+            String apiResp = apiRes.getBody();
+            
+            // 打印接口返回的原始字符串
+            SpiderDebug.log("=== [步骤8-接口返回体] " + (apiResp.isEmpty() ? "!!! 内容为空 !!!" : apiResp));
 
-            if (apiResp != null && !apiResp.isEmpty()) {
-                JsonObject resJson = JsonParser.parseString(apiResp).getAsJsonObject();
-                String finalUrl = resJson.has("url") ? resJson.get("url").getAsString() : "";
-                if (!finalUrl.isEmpty()) {
-                    SpiderDebug.log("=== [7. 解析成功] URL: " + finalUrl);
-                    return Result.get().url(finalUrl).header(headers).string();
-                }
+            if (!apiResp.isEmpty()) {
+                // ... 解析 JSON 并返回 ...
             }
         } catch (Exception e) {
-            SpiderDebug.log("=== [错误] API请求异常: " + e.getMessage());
+            SpiderDebug.log("=== [错误] 最终接口请求失败: " + e.getMessage());
         }
 
-        return Result.get().url("").string();
-    }
 
 
 
