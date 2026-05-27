@@ -148,79 +148,42 @@ public class Qkys extends Spider {
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         String playUrl = id.startsWith("http") ? id : host + id;
-        SpiderDebug.log("=== [1. 开始解析] 目标URL: " + playUrl);
+        SpiderDebug.log("=== [1. 开始解析] URL: " + playUrl);
 
-        // 1. 准备标准的手机端 Headers
         HashMap<String, String> headers = new HashMap<>();
         headers.put("User-Agent", "Mozilla/5.0 (Linux; Android 12; SKW-A0 Build/SKW-A0211011CN00MP8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/96.0.4664.104 Mobile Safari/537.36");
         headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
         headers.put("Referer", host + "/");
-        headers.put("Accept-Language", "zh-CN,zh;q=0.9");
 
-        // 2. 第一次请求：目的是获取服务器下发的 Cookie (Session)
-        SpiderDebug.log("=== [2. 第一次请求] 尝试激活访问权限...");
+        // --- 第一步：获取 Cookie ---
         OkResult res1 = OkHttp.get(playUrl, null, headers);
-        
-        // --- 核心修改：使用 getResp() 获取响应头 ---
-        Map<String, List<String>> respHeaders = res1.getResp();
         String cookieStr = "";
+        Map<String, List<String>> respHeaders = res1.getResp();
         if (respHeaders != null && respHeaders.containsKey("set-cookie")) {
             List<String> cookies = respHeaders.get("set-cookie");
             StringBuilder sb = new StringBuilder();
-            for (String c : cookies) {
-                // 提取 Cookie 的 key=value 部分
-                sb.append(c.split(";")[0]).append("; ");
-            }
+            for (String c : cookies) sb.append(c.split(";")[0]).append("; ");
             cookieStr = sb.toString();
-            SpiderDebug.log("=== [调试] 成功提取 Cookie: " + cookieStr);
-        }
-
-        // 3. 将提取到的 Cookie 塞入下一次请求的 Headers 中
-        if (!cookieStr.isEmpty()) {
             headers.put("Cookie", cookieStr);
         }
 
-        // 稍微等待，模拟浏览器解析 JS 的过程
         Thread.sleep(800);
 
-        // 4. 第二次请求：带上 Cookie 再次访问，此时应该能拿到包含 player_aaaa 的源码
-        SpiderDebug.log("=== [3. 第二次请求] 正在带 Cookie 获取核心源码...");
+        // --- 第二步：获取播放页源码 ---
         String html = OkHttp.string(playUrl, headers);
+        if (html == null || !html.contains("player_aaaa")) return Result.get().url("").string();
 
-        // 5. 源码检视逻辑
-        if (html == null || !html.contains("player_aaaa")) {
-            SpiderDebug.log("=== [错误] 源码未发现 player_aaaa");
-            if (html != null && !html.trim().isEmpty()) {
-                // 转义尖括号，防止 log.html 渲染异常
-                String safeHtml = html.length() > 500 ? html.substring(0, 500) : html;
-                safeHtml = safeHtml.replace("<", "&lt;").replace(">", "&gt;");
-                SpiderDebug.log("=== [源码检视-前500字] \n" + safeHtml);
-            }
-            return Result.get().url("").string();
-        }
+        // --- 第三步：提取播放器 JSON ---
+        String marker = "var player_aaaa=";
+        int start = html.indexOf(marker) + marker.length();
+        int jsonStart = html.indexOf("{", start);
+        int jsonEnd = html.indexOf("</script>", jsonStart);
+        if (jsonEnd == -1) jsonEnd = html.indexOf(";", jsonStart);
+        String jsonStr = html.substring(jsonStart, jsonEnd).trim();
+        if (jsonStr.endsWith(";")) jsonStr = jsonStr.substring(0, jsonStr.length() - 1);
+        JsonObject pdata = JsonParser.parseString(jsonStr).getAsJsonObject();
 
-        SpiderDebug.log("=== [4. 源码成功] 长度: " + html.length());
-
-        // 6. 提取 JSON (保持稳定逻辑)
-        JsonObject pdata;
-        try {
-            String marker = "var player_aaaa=";
-            int start = html.indexOf(marker) + marker.length();
-            int jsonStart = html.indexOf("{", start);
-            int jsonEnd = html.indexOf("</script>", jsonStart);
-            if (jsonEnd == -1) jsonEnd = html.indexOf(";", jsonStart);
-
-            String jsonStr = html.substring(jsonStart, jsonEnd).trim();
-            if (jsonStr.endsWith(";")) jsonStr = jsonStr.substring(0, jsonStr.length() - 1);
-            
-            pdata = JsonParser.parseString(jsonStr).getAsJsonObject();
-            SpiderDebug.log("=== [5. JSON提取成功]");
-        } catch (Exception e) {
-            SpiderDebug.log("=== [错误] JSON 解析崩溃: " + e.getMessage());
-            return Result.get().url("").string();
-        }
-
-        // 7. 解析中转页并获取最终地址
+        // --- 第四步：构造中转页链接 (已修复语法) ---
         String pUrl = pdata.get("url").getAsString();
         String pFrom = pdata.get("from").getAsString();
         String pNext = pdata.has("link_next") ? pdata.get("link_next").getAsString() : "";
@@ -232,53 +195,60 @@ public class Qkys extends Spider {
                 + "&next=" + URLEncoder.encode(pNext, "UTF-8")
                 + "&data=" + URLEncoder.encode(pPlayData, "UTF-8");
 
-        // 中转页请求也必须带上这个 Headers 和 Cookie
-        // --- 1. 打印中转页请求信息 ---
-        String fullIdxLink = jxHost + "/index.php?url=" + URLEncoder.encode(pUrl, "UTF-8") + ...; // 拼接逻辑
-        SpiderDebug.log("=== [步骤6-中转页请求] URL: " + fullIdxLink);
-        
+        // 【关键日志1】访问链接和请求头
+        SpiderDebug.log("=== [调试-中转页链接] " + fullIdxLink);
+        SpiderDebug.log("=== [调试-请求头Cookie] " + headers.get("Cookie"));
+
         String idxHtml = OkHttp.string(fullIdxLink, headers);
 
-        // --- 2. 打印提取出的核心变量 ---
+        // --- 第五步：提取变量 ---
         String vUrl = extractFromConfig("url", idxHtml);
         String vTime = extractFromConfig("time", idxHtml);
         String vKey = extractFromConfig("vkey", idxHtml);
-        SpiderDebug.log("=== [步骤7-变量提取] url=" + vUrl + ", time=" + vTime + ", vkey=" + vKey);
+
+        // 【关键日志2】打印提取的变量
+        SpiderDebug.log("=== [调试-提取结果] vUrl: " + vUrl + " | vTime: " + vTime + " | vKey: " + vKey);
 
         if (vUrl.isEmpty()) {
-            SpiderDebug.log("=== [错误] 未能在中转页找到 config 参数");
+            SpiderDebug.log("=== [错误] 未能从 index.php 提取到 vUrl");
             return Result.get().url("").string();
         }
 
-        // --- 3. 准备最终接口请求头 ---
-        headers.put("Referer", fullIdxLink); // 伪装成从中转页跳过来的
-        headers.put("Origin", jxHost);
-        headers.put("X-Requested-With", "XMLHttpRequest");
-
-        // 打印发送给接口的全部 Header
-        SpiderDebug.log("=== [调试-最终请求头] Cookie: " + headers.get("Cookie"));
-        SpiderDebug.log("=== [调试-最终请求头] Referer: " + headers.get("Referer"));
-
-        // --- 4. 最终 POST ---
+        // --- 第六步：最终接口请求 ---
         Map<String, String> apiPayload = new HashMap<>();
         apiPayload.put("url", vUrl);
         apiPayload.put("time", vTime);
         apiPayload.put("vkey", vKey);
         
+        // 补全接口校验头
+        headers.put("Referer", fullIdxLink);
+        headers.put("Origin", jxHost);
+        headers.put("X-Requested-With", "XMLHttpRequest");
+
         try {
             OkResult apiRes = OkHttp.post(jxHost + "/admin/mizhi_json.php", apiPayload, headers);
             String apiResp = apiRes.getBody();
-            
-            // 打印接口返回的原始字符串
-            SpiderDebug.log("=== [步骤8-接口返回体] " + (apiResp.isEmpty() ? "!!! 内容为空 !!!" : apiResp));
+
+            // 【关键日志3】打印接口响应
+            SpiderDebug.log("=== [最终响应内容] " + (apiResp.isEmpty() ? "返回体为空" : apiResp));
 
             if (!apiResp.isEmpty()) {
-                // ... 解析 JSON 并返回 ...
+                JsonObject resJson = JsonParser.parseString(apiResp).getAsJsonObject();
+                String finalUrl = "";
+                if (resJson.has("url")) finalUrl = resJson.get("url").getAsString();
+                else if (resJson.has("video_url")) finalUrl = resJson.get("video_url").getAsString();
+
+                if (!finalUrl.isEmpty()) {
+                    SpiderDebug.log("=== [解析成功] " + finalUrl);
+                    return Result.get().url(finalUrl).header(headers).string();
+                }
             }
         } catch (Exception e) {
-            SpiderDebug.log("=== [错误] 最终接口请求失败: " + e.getMessage());
+            SpiderDebug.log("=== [错误] 接口请求崩溃: " + e.getMessage());
         }
 
+        return Result.get().url("").string();
+    } // 确保这个右花括号存在
 
 
 
