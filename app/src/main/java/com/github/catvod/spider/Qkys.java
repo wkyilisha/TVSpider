@@ -1,19 +1,15 @@
 package com.github.catvod.spider;
 
 import com.github.catvod.bean.Class;
-import com.github.catvod.bean.Filter;
 import com.github.catvod.bean.Result;
 import com.github.catvod.bean.Vod;
 import com.github.catvod.crawler.Spider;
-// 导入 SpiderDebug
-import com.github.catvod.crawler.SpiderDebug; 
 import com.github.catvod.net.OkHttp;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.github.catvod.net.OkResult;
-import org.apache.commons.codec.binary.Base64;
-import com.github.catvod.utils.Notify;
+import com.github.catvod.crawler.SpiderDebug;
 
-import org.apache.commons.lang3.StringUtils;
-import org.json.JSONObject;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -22,251 +18,290 @@ import org.jsoup.select.Elements;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class Qkys extends Spider {
-    private final String siteUrl = "https://m.87kkt.com";
 
-    private Map<String, String> getHeader() {
-        Map<String, String> header = new HashMap<>();
-        header.put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36");
-        header.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
-        String cookieString = "server_name_session=da36177dc7200e1bf20e798481dd4311; 5904a3788f1fcbc81fff0c26f2688e30=9f67751aaa76577c6408309ee1e0a6f5";
-        header.put("Cookie", cookieString);
-        return header;
-    }
+    private String host = "https://www.qkw1.com";
+    private String jxHost = "https://zyz-omtcqq-com-oss-cn-hangzhou-shanghai-yys-valipl-vip-cp11.xmsu8.top";
 
-    private Map<String, String> getVideoHeader() {
-        Map<String, String> header = new HashMap<>();
-        header.put("Accept", "*/*");
-        header.put("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8,zh-TW;q=0.7,de;q=0.6");
-        header.put("Cache-Control", "no-cache");
-        header.put("Connection", "keep-alive");
-        header.put("Pragma", "no-cache");
-        header.put("Sec-Fetch-Dest", "video");
-        header.put("Sec-Fetch-Mode", "no-cors");
-        header.put("Sec-Fetch-Site", "cross-site");
-        header.put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-        return header;
+    private HashMap<String, String> getHeaders() {
+        HashMap<String, String> headers = new HashMap<>();
+        headers.put("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
+        headers.put("Accept-Language", "zh-CN,zh;q=0.9");
+        headers.put("Connection", "keep-alive");
+        headers.put("Referer", host + "/");
+        return headers;
     }
 
     @Override
     public String homeContent(boolean filter) throws Exception {
-        List<Vod> list = new ArrayList<>();
         List<Class> classes = new ArrayList<>();
-        LinkedHashMap<String, List<Filter>> filters = new LinkedHashMap<>();
-        Document doc = Jsoup.parse(OkHttp.string(siteUrl));
-        for (Element div : doc.select(".stui-header__menu > li ")) {
-            classes.add(new Class(div.select(" a").attr("href"), div.select(" a").text()));
-        }
-        getVods(list, doc);
-        return Result.string(classes, list);
-    }
-
-    private void getVods(List<Vod> list, Document doc) {
-        for (Element div : doc.select(".stui-vodlist > li")) {
-            String id = div.select(".stui-vodlist__box > a.stui-vodlist__thumb").attr("href");
-            String name = div.select(".stui-vodlist__detail >h4.title > a").text();
-            String pic = div.select(".stui-vodlist__box > a.stui-vodlist__thumb").attr("data-original");
-            if (pic.isEmpty()) pic = div.select("img").attr("src");
-            String remark = div.select(".stui-vodlist__box > a.stui-vodlist__thumb > span.pic-text").text();
-            list.add(new Vod(id, name, pic, remark));
-        }
+        classes.add(new Class("guochan", "国产剧"));
+        classes.add(new Class("2", "连续剧"));
+        classes.add(new Class("1", "电影"));
+        classes.add(new Class("3", "综艺"));
+        classes.add(new Class("4", "动漫"));
+        return Result.string(classes, new ArrayList<>());
     }
 
     @Override
     public String categoryContent(String tid, String pg, boolean filter, HashMap<String, String> extend) throws Exception {
+        String url = host + "/qkwshow/" + tid + "--------" + pg + "---.html";
+        Document doc = Jsoup.parse(OkHttp.string(url, getHeaders()));
         List<Vod> list = new ArrayList<>();
-        String[] arr = tid.split("\\.");
-        String target = siteUrl + arr[0] + "-" + pg + ".html";
-        String html = OkHttp.string(target);
-        Document doc = Jsoup.parse(html);
-        getVods(list, doc);
-        String total = "" + Integer.MAX_VALUE;
-        return Result.get().vod(list).page(Integer.parseInt(pg), Integer.parseInt(total) / 12 + ((Integer.parseInt(total) % 12) > 0 ? 1 : 0), 12, Integer.parseInt(total)).string();
+        for (Element item : doc.select(".stui-vodlist__item")) {
+            Element thumb = item.selectFirst(".stui-vodlist__thumb");
+            if (thumb == null) continue;
+            String href = thumb.attr("href");
+            if (!href.startsWith("http")) href = host + href;
+            String pic = thumb.attr("data-original");
+            if (pic == null || pic.isEmpty()) pic = thumb.attr("src");
+            list.add(new Vod(href, thumb.attr("title"), pic, item.select(".pic-text").text().trim()));
+        }
+        return Result.get().page(Integer.parseInt(pg), Integer.parseInt(pg) + 1, list.size(), 1000).vod(list).string();
     }
 
     @Override
     public String detailContent(List<String> ids) throws Exception {
-        String detailUrl = this.siteUrl + ids.get(0);
-        Document doc = Jsoup.parse(OkHttp.string(detailUrl, getHeader()));
-
-        String title = doc.select(".stui-content__detail > h1.title.wdetail").text();
-        String vodPic = doc.select(".stui-content__thumb > a.pic > img").attr("data-original");
-        if (StringUtils.isEmpty(vodPic)) {
-            vodPic = doc.select(".stui-content__thumb > a.pic > img").attr("src");
-        }
-
-        String classifyInfo = doc.select(".stui-content__detail > p.data.hidden-xs").text();
-        String classifyName = "";
-        String vodArea = "";
-        String vodYear = "";
-        if (StringUtils.isNotEmpty(classifyInfo)) {
-            String[] infoParts = classifyInfo.split(" / ");
-            for (String part : infoParts) {
-                if (part.startsWith("类型：")) {
-                    classifyName = part.replace("类型：", "");
-                } else if (part.startsWith("地区：")) {
-                    vodArea = part.replace("地区：", "");
-                } else if (part.startsWith("年份：")) {
-                    vodYear = part.replace("年份：", "");
-                }
-            }
-        }
-
-        String vodRemarks = doc.select(".stui-content__detail > p.data:contains(\"状态：\") > span").text();
-
-        StringBuilder director = new StringBuilder();
-        Elements directorLinks = doc.select(".stui-content__detail > p.data:contains(\"导演：\") > a");
-        for (Element a : directorLinks) {
-            director.append(a.text()).append(" ");
-        }
-        String vodDirector = director.toString().trim();
-
-        StringBuilder actor = new StringBuilder();
-        Elements actorLinks = doc.select(".stui-content__detail > p.data:contains(\"主演：\") > a");
-        for (Element a : actorLinks) {
-            actor.append(a.text()).append(" ");
-        }
-        String vodActor = actor.toString().trim();
-
-        String briefSketch = doc.select(".detail-sketch").text();
-        String briefContent = doc.select(".detail-content").text();
-        String vodContent = StringUtils.isEmpty(briefContent) ? briefSketch : (briefSketch + briefContent);
-        StringBuilder vodPlayFrom = new StringBuilder();
-        StringBuilder vodPlayUrl = new StringBuilder();
-
-// 1. 选择所有的线路标题（Element Head）
-// CSS选择器：匹配所有 class="stui-vodlist__head" 的 div 元素
-        Elements heads = doc.select("div.stui-vodlist__head");
-
-// 2. 选择所有的播放列表 (Element List)
-// CSS选择器：匹配所有 class="stui-content__playlist" 的 ul 元素
-        Elements playlists = doc.select("ul.stui-content__playlist");
-
-// 确保线路标题和播放列表的数量一致或播放列表不少于标题
-// 如果数量不一致，可能意味着定位失败，或者网站结构不规范
-        if (heads.size() != playlists.size()) {
-            // 我们可以继续，但可能出错。先假设它们数量是一致的。
-            System.out.println("警告：线路标题数量与播放列表数量不匹配！");
-        }
-
-// 3. 通过索引同步遍历
-// 遍历线路标题集合
-        for (int i = 0; i < heads.size(); i++) {
-            Element head = heads.get(i);
-            // 检查索引是否越界，安全起见
-            if (i >= playlists.size()) {
-                break;
-            }
-
-            // 获取当前线路标题
-            String sourceName = head.select("h3.title").text().trim();
-            if (StringUtils.isEmpty(sourceName)) {
-                continue;
-            }
-
-            // 获取与当前线路标题i对应的播放列表 i
-            Element playlist = playlists.get(i);
-
-            // 从列表中选择所有剧集链接
-            Elements episodes = playlist.select("li > a");
-            if (episodes.isEmpty()) {
-                continue;
-            }
-
-            // --- 线路名称拼接 (使用 CatVod 标准 $$$ 分隔) ---
-            if (vodPlayFrom.length() > 0) {
-                vodPlayFrom.append("$$$");
-            }
-            vodPlayFrom.append(sourceName);
-
-            // --- 集数链接拼接 ---
-            StringBuilder episodeStr = new StringBuilder();
-            for (Element episode : episodes) {
-                String epName = episode.text().trim();
-                String epUrl = episode.attr("href"); // 播放链接
-
-                if (StringUtils.isEmpty(epUrl)) {
-                    continue;
-                }
-
-                if (episodeStr.length() > 0) {
-                    episodeStr.append("#"); // 剧集间分隔符
-                }
-                // 格式：集名$链接
-                episodeStr.append(epName).append("$").append(epUrl);
-            }
-
-            // --- 播放链接拼接 (使用 CatVod 标准 $$$ 分隔) ---
-            if (episodeStr.length() > 0) {
-                if (vodPlayUrl.length() > 0) {
-                    vodPlayUrl.append("$$$");
-                }
-                vodPlayUrl.append(episodeStr.toString());
-            }
-        }
+        String url = ids.get(0).startsWith("http") ? ids.get(0) : host + ids.get(0);
+        Document doc = Jsoup.parse(OkHttp.string(url, getHeaders()));
         Vod vod = new Vod();
         vod.setVodId(ids.get(0));
-        vod.setVodName(title);
-        vod.setVodPic(vodPic);
-        vod.setTypeName(classifyName);
-        vod.setVodArea(vodArea);
-        vod.setVodYear(vodYear);
-        vod.setVodRemarks(vodRemarks);
-        vod.setVodDirector(vodDirector);
-        vod.setVodActor(vodActor);
-        vod.setVodContent(vodContent);
-        vod.setVodPlayFrom(vodPlayFrom.toString());
-        vod.setVodPlayUrl(vodPlayUrl.toString());
-        return Result.string(vod);
+
+        Element titleElem = doc.selectFirst(".stui-content__detail .title");
+        if (titleElem != null) vod.setVodName(titleElem.text().trim());
+
+        Element thumbImg = doc.selectFirst(".stui-content__thumb img");
+        if (thumbImg != null) {
+            String pic = thumbImg.attr("data-original");
+            if (pic == null || pic.isEmpty()) pic = thumbImg.attr("src");
+            vod.setVodPic(pic);
+        }
+        Element picText = doc.selectFirst(".stui-content__thumb .pic-text");
+        if (picText != null) vod.setVodRemarks(picText.text().trim());
+
+        Element dirElem = doc.selectFirst(".stui-content__detail p.data:contains(导演)");
+        if (dirElem != null) vod.setVodDirector(dirElem.text().replace("导演：", "").trim());
+
+        Element actElem = doc.selectFirst(".stui-content__detail p.data:contains(主演)");
+        if (actElem != null) vod.setVodActor(actElem.text().replace("主演：", "").trim());
+
+        Element typeElem = doc.selectFirst(".stui-content__detail p.data:contains(类型)");
+        if (typeElem != null) vod.setTypeName(typeElem.text().replace("类型：", "").trim());
+
+        Element areaElem = doc.selectFirst(".stui-content__detail p.data:contains(地区)");
+        if (areaElem != null) vod.setVodArea(areaElem.text().replace("地区：", "").trim());
+
+        Element yearElem = doc.selectFirst(".stui-content__detail p.data:contains(年份)");
+        if (yearElem != null) vod.setVodYear(yearElem.text().replace("年份：", "").trim());
+
+        Element descElem = doc.selectFirst(".stui-content__desc");
+        if (descElem != null) vod.setVodContent(descElem.text().trim());
+
+        List<String> fromList = new ArrayList<>();
+        List<String> urlList = new ArrayList<>();
+        for (Element head : doc.select(".stui-pannel__head")) {
+            String title = head.select("h3.title").text();
+            if (title.contains("源") || title.contains("播放")) {
+                fromList.add(title);
+                Elements as = head.parent().select("ul.stui-content__playlist a");
+                List<String> links = new ArrayList<>();
+                for (Element a : as) {
+                    String href = a.attr("href");
+                    if (!href.startsWith("http")) href = host + href;
+                    links.add(a.text() + "$" + href);
+                }
+                urlList.add(String.join("#", links));
+            }
+        }
+        vod.setVodPlayFrom(String.join("$$$", fromList));
+        vod.setVodPlayUrl(String.join("$$$", urlList));
+
+        return Result.get().vod(vod).string();
     }
 
     @Override
     public String searchContent(String key, boolean quick) throws Exception {
-        String encodedKey = URLEncoder.encode(key, "UTF-8");
-        String searchUrl = siteUrl + "/87s" + encodedKey + "----------1---.html";
-        String html = OkHttp.string(searchUrl);
-        if (html.contains("Just a moment")) {
-            Notify.show("在线之家资源需要人机验证");
-        }
-        Document document = Jsoup.parse(html);
+        return searchContent(key, quick, "1");
+    }
+
+    public String searchContent(String key, boolean quick, String pg) throws Exception {
+        String url = host + "/qkwsearch/-------------.html?wd=" + URLEncoder.encode(key, "UTF-8") + "&submit=";
+        Document doc = Jsoup.parse(OkHttp.string(url, getHeaders()));
         List<Vod> list = new ArrayList<>();
-        for (Element div : document.select(".stui-vodlist > li")) {
-            String id = div.select("a.stui-vodlist__thumb").attr("href");
-            String name = div.select(".stui-vodlist__detail > h4.title > a").text();
-            String pic = div.select("a.stui-vodlist__thumb").attr("data-original");
-            if (pic.isEmpty()) pic = div.select("img").attr("src");
-            String remark = div.select("a.stui-vodlist__thumb > span.pic-text").text();
-            list.add(new Vod(id, name, pic, remark));
+        for (Element item : doc.select(".stui-vodlist__item")) {
+            Element thumb = item.selectFirst(".stui-vodlist__thumb");
+            if (thumb == null) continue;
+            String href = thumb.attr("href");
+            if (!href.startsWith("http")) href = host + href;
+            String pic = thumb.attr("data-original");
+            if (pic == null || pic.isEmpty()) pic = thumb.attr("src");
+            list.add(new Vod(href, thumb.attr("title"), pic, item.select(".pic-text").text().trim()));
         }
         return Result.string(list);
     }
 
+    // === 根据 Python 逻辑深度重构的视频解析部分 ===
     @Override
-    public String playerContent(String flag, String id, List<String> vipFlags) {
-        try {
-            JSONObject result = new JSONObject();
+    public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
+        String playUrl = id.startsWith("http") ? id : host + id;
+        SpiderDebug.step("1. 开始解析播放页", "URL: " + playUrl);
 
-            // 修复：将 getHeaders() 改为 getHeader() 或 getVideoHeader()
-            // 在此使用 getVideoHeader() 更符合播放请求的语境
-            Map<String, String> headers = getVideoHeader(); 
-            
-            result.put("parse", 1); // 1表示需要嗅探（默认）
-            result.put("header", new JSONObject(headers)); // CatVod框架要求headers为JSONObject
-            result.put("playUrl", ""); // 无需填充
-            result.put("url", id); // 播放链接，即 id
-            return result.toString();
+        HashMap<String, String> h1 = getHeaders();
+        h1.put("Referer", host + "/");
 
-        } catch (Exception e) {
-            // 修复：使用已导入的 SpiderDebug.log(e)
-            SpiderDebug.log(e); 
+        String html = "";
+        for (int i = 0; i < 3; i++) {
+            try {
+                html = OkHttp.string(playUrl, h1);
+                if (html.contains("player_aaaa")) break;
+                Thread.sleep(1000);
+            } catch (Exception e) {
+                SpiderDebug.log("播放页请求重试 - 次数: " + (i + 1));
+            }
         }
-        return "";
+
+        if (!html.contains("player_aaaa")) {
+            SpiderDebug.step("错误", "源码中未找到 player_aaaa，可能是被防火墙拦截或页面改版");
+            return Result.get().parse(1).url(playUrl).string();
+        }
+
+        // 第一步：提取 player_aaaa
+        JsonObject pdata;
+        try {
+            int start = html.indexOf("var player_aaaa=");
+            start = html.indexOf("{", start);
+            int end = findJsonEnd(html, start);
+            String jsonStr = html.substring(start, end + 1).trim();
+            pdata = JsonParser.parseString(jsonStr).getAsJsonObject();
+            
+            SpiderDebug.step("2. 提取player_aaaa成功", "内容: " + jsonStr);
+        } catch (Exception e) {
+            SpiderDebug.log(e);
+            return Result.get().parse(1).url(playUrl).string();
+        }
+
+        String pUrl      = pdata.has("url")       ? pdata.get("url").getAsString()       : "";
+        String pFrom     = pdata.has("from")       ? pdata.get("from").getAsString()      : "";
+        String pNext     = pdata.has("link_next")  ? pdata.get("link_next").getAsString() : "";
+        String pPlayData = pdata.has("play_data")  ? pdata.get("play_data").getAsString() : "";
+
+        if (!pNext.isEmpty()) pNext = "https://www.qkw1.com" + pNext;
+
+        // 第二步：GET 中转页
+        String fullIdxLink = jxHost + "/index.php"
+                + "?url="  + URLEncoder.encode(pUrl,      "UTF-8")
+                + "&type=" + URLEncoder.encode(pFrom,     "UTF-8")
+                + "&next=" + URLEncoder.encode(pNext,     "UTF-8")
+                + "&data=" + URLEncoder.encode(pPlayData, "UTF-8");
+        
+        SpiderDebug.step("3. 拼接中转页URL", "完整链接: " + fullIdxLink);
+
+        HashMap<String, String> h2 = new HashMap<>();
+        h2.put("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36");
+        h2.put("Referer", "https://www.qkw1.com/");
+
+        String idxHtml = OkHttp.string(fullIdxLink, h2);
+        SpiderDebug.step("4. 获取中转页源码", "长度: " + (idxHtml == null ? 0 : idxHtml.length()));
+
+        String vUrl  = extractFromConfig("url",  idxHtml);
+        String vTime = extractFromConfig("time", idxHtml);
+        String vKey  = extractFromConfig("vkey", idxHtml);
+        
+        SpiderDebug.step("5. 解析Config结果", "vUrl: " + vUrl + " | vTime: " + vTime + " | vKey: " + vKey);
+
+        if (vUrl.isEmpty() || vTime.isEmpty()) {
+            SpiderDebug.step("错误", "中转页参数提取失败，请检查 extractFromConfig 正则逻辑");
+            return Result.get().parse(1).url(playUrl).string();
+        }
+
+        // 第三步：POST mizhi_json.php
+        Map<String, String> apiPayload = new HashMap<>();
+        apiPayload.put("url",  vUrl);
+        apiPayload.put("time", vTime);
+        apiPayload.put("key",  "");
+        apiPayload.put("vkey", vKey);
+
+        HashMap<String, String> apiHeaders = new HashMap<>();
+        apiHeaders.put("User-Agent", "Mozilla/5.0 (Linux; Android 12; Redmi K30 5G Build/SKQ1.211006.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/96.0.4664.104 Mobile Safari/537.36");
+        apiHeaders.put("Referer", fullIdxLink);
+        apiHeaders.put("Origin", jxHost);
+        apiHeaders.put("X-Requested-With", "XMLHttpRequest");
+
+        try {
+            SpiderDebug.step("6. 发起最终API请求", "Payload: " + apiPayload.toString());
+            OkResult apiRes  = OkHttp.post(jxHost + "/admin/mizhi_json.php", apiPayload, apiHeaders);
+            String   apiResp = apiRes.getBody();
+            SpiderDebug.step("7. API响应内容", "Response: " + apiResp);
+
+            if (!apiResp.isEmpty()) {
+                JsonObject resJson  = JsonParser.parseString(apiResp).getAsJsonObject();
+                String     finalUrl = resJson.has("url") ? resJson.get("url").getAsString() : "";
+
+                if (!finalUrl.isEmpty()) {
+                    SpiderDebug.step("8. 解析成功", "最终播放地址: " + finalUrl);
+                    return Result.get().url(finalUrl).string();
+                }
+            }
+        } catch (Exception e) {
+            SpiderDebug.log(e);
+        }
+
+        return Result.get().parse(1).url(playUrl).string();
     }
+
+
+    private int findJsonEnd(String text, int start) {
+    int count = 0;
+    for (int i = start; i < text.length(); i++) {
+        char c = text.charAt(i);
+        if (c == '{') {
+            count++;
+        } else if (c == '}') {
+            count--;
+            if (count == 0) return i;
+        }
+    }
+    return text.length() - 1;
 }
 
+    private String extractFromConfig(String name, String text) {
+    if (text == null || text.isEmpty()) return "";
+
+    int configStart = text.indexOf("var config");
+    if (configStart == -1) return "";
+
+    int braceStart = text.indexOf("{", configStart);
+    if (braceStart == -1) return "";
+
+    int braceEnd = findJsonEnd(text, braceStart);
+    String configBlock = text.substring(braceStart, braceEnd + 1);
+
+    String[] patterns = {
+        "\"" + name + "\"\\s*:\\s*\"([^\"]*)\"",
+        "'" + name + "'\\s*:\\s*'([^']*)'",
+        "\"" + name + "\"\\s*:\\s*(\\d+)"
+    };
+
+    for (String pat : patterns) {
+        Matcher m = Pattern.compile(pat).matcher(configBlock);
+        if (m.find()) return m.group(1).trim();
+    }
+    return "";
+}
+
+    private String urlEncodeParams(Map<String, String> params) throws Exception {
+    StringBuilder sb = new StringBuilder();
+    for (Map.Entry<String, String> entry : params.entrySet()) {
+        if (sb.length() > 0) sb.append("&");
+        sb.append(URLEncoder.encode(entry.getKey(), "UTF-8"))
+          .append("=")
+          .append(URLEncoder.encode(entry.getValue(), "UTF-8"));
+    }
+    return sb.toString();
+}
+}
