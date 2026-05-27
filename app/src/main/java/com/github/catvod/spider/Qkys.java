@@ -145,32 +145,22 @@ public class Qkys extends Spider {
         return Result.string(list);
     }
 
-    // === 根据 Python 逻辑深度重构的视频解析部分 ===
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
         String playUrl = id.startsWith("http") ? id : host + id;
-        SpiderDebug.step("1. 开始解析播放页", "URL: " + playUrl);
+        SpiderDebug.log("=== [1.开始解析] URL: " + playUrl);
 
         HashMap<String, String> h1 = getHeaders();
         h1.put("Referer", host + "/");
 
-        String html = "";
-        for (int i = 0; i < 3; i++) {
-            try {
-                html = OkHttp.string(playUrl, h1);
-                if (html.contains("player_aaaa")) break;
-                Thread.sleep(1000);
-            } catch (Exception e) {
-                SpiderDebug.log("播放页请求重试 - 次数: " + (i + 1));
-            }
-        }
-
+        String html = OkHttp.string(playUrl, h1);
+        
         if (!html.contains("player_aaaa")) {
-            SpiderDebug.step("错误", "源码中未找到 player_aaaa，可能是被防火墙拦截或页面改版");
+            SpiderDebug.log("=== [错误] 源码未找到 player_aaaa");
             return Result.get().parse(1).url(playUrl).string();
         }
 
-        // 第一步：提取 player_aaaa
+        // 提取 player_aaaa
         JsonObject pdata;
         try {
             int start = html.indexOf("var player_aaaa=");
@@ -178,72 +168,48 @@ public class Qkys extends Spider {
             int end = findJsonEnd(html, start);
             String jsonStr = html.substring(start, end + 1).trim();
             pdata = JsonParser.parseString(jsonStr).getAsJsonObject();
-            
-            SpiderDebug.step("2. 提取player_aaaa成功", "内容: " + jsonStr);
+            SpiderDebug.log("=== [2.提取成功] PData: " + jsonStr);
         } catch (Exception e) {
-            SpiderDebug.log(e);
+            SpiderDebug.log("=== [错误] JSON解析失败");
             return Result.get().parse(1).url(playUrl).string();
         }
 
-        String pUrl      = pdata.has("url")       ? pdata.get("url").getAsString()       : "";
-        String pFrom     = pdata.has("from")       ? pdata.get("from").getAsString()      : "";
-        String pNext     = pdata.has("link_next")  ? pdata.get("link_next").getAsString() : "";
-        String pPlayData = pdata.has("play_data")  ? pdata.get("play_data").getAsString() : "";
-
-        if (!pNext.isEmpty()) pNext = "https://www.qkw1.com" + pNext;
-
-        // 第二步：GET 中转页
-        String fullIdxLink = jxHost + "/index.php"
-                + "?url="  + URLEncoder.encode(pUrl,      "UTF-8")
-                + "&type=" + URLEncoder.encode(pFrom,     "UTF-8")
-                + "&next=" + URLEncoder.encode(pNext,     "UTF-8")
-                + "&data=" + URLEncoder.encode(pPlayData, "UTF-8");
+        String pUrl = pdata.get("url").getAsString();
+        String pFrom = pdata.get("from").getAsString();
         
-        SpiderDebug.step("3. 拼接中转页URL", "完整链接: " + fullIdxLink);
+        // 拼接中转页
+        String fullIdxLink = jxHost + "/index.php?url=" + URLEncoder.encode(pUrl, "UTF-8") + "&type=" + pFrom;
+        SpiderDebug.log("=== [3.中转链接] " + fullIdxLink);
 
-        HashMap<String, String> h2 = new HashMap<>();
-        h2.put("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36");
-        h2.put("Referer", "https://www.qkw1.com/");
-
-        String idxHtml = OkHttp.string(fullIdxLink, h2);
-        SpiderDebug.step("4. 获取中转页源码", "长度: " + (idxHtml == null ? 0 : idxHtml.length()));
-
+        String idxHtml = OkHttp.string(fullIdxLink, getHeaders());
+        
+        // 检查配置解析
         String vUrl  = extractFromConfig("url",  idxHtml);
         String vTime = extractFromConfig("time", idxHtml);
         String vKey  = extractFromConfig("vkey", idxHtml);
-        
-        SpiderDebug.step("5. 解析Config结果", "vUrl: " + vUrl + " | vTime: " + vTime + " | vKey: " + vKey);
+        SpiderDebug.log("=== [4.Config解析] vUrl: " + vUrl + ", vTime: " + vTime);
 
-        if (vUrl.isEmpty() || vTime.isEmpty()) {
-            SpiderDebug.step("错误", "中转页参数提取失败，请检查 extractFromConfig 正则逻辑");
+        if (vUrl.isEmpty()) {
+            SpiderDebug.log("=== [错误] Config提取为空，请检查 extractFromConfig 方法");
             return Result.get().parse(1).url(playUrl).string();
         }
 
-        // 第三步：POST mizhi_json.php
+        // 最终 POST 请求
         Map<String, String> apiPayload = new HashMap<>();
-        apiPayload.put("url",  vUrl);
+        apiPayload.put("url", vUrl);
         apiPayload.put("time", vTime);
-        apiPayload.put("key",  "");
         apiPayload.put("vkey", vKey);
 
-        HashMap<String, String> apiHeaders = new HashMap<>();
-        apiHeaders.put("User-Agent", "Mozilla/5.0 (Linux; Android 12; Redmi K30 5G Build/SKQ1.211006.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/96.0.4664.104 Mobile Safari/537.36");
-        apiHeaders.put("Referer", fullIdxLink);
-        apiHeaders.put("Origin", jxHost);
-        apiHeaders.put("X-Requested-With", "XMLHttpRequest");
-
         try {
-            SpiderDebug.step("6. 发起最终API请求", "Payload: " + apiPayload.toString());
-            OkResult apiRes  = OkHttp.post(jxHost + "/admin/mizhi_json.php", apiPayload, apiHeaders);
-            String   apiResp = apiRes.getBody();
-            SpiderDebug.step("7. API响应内容", "Response: " + apiResp);
+            OkResult apiRes = OkHttp.post(jxHost + "/admin/mizhi_json.php", apiPayload, getHeaders());
+            String apiResp = apiRes.getBody();
+            SpiderDebug.log("=== [5.接口响应] " + apiResp);
 
             if (!apiResp.isEmpty()) {
-                JsonObject resJson  = JsonParser.parseString(apiResp).getAsJsonObject();
-                String     finalUrl = resJson.has("url") ? resJson.get("url").getAsString() : "";
-
+                JsonObject resJson = JsonParser.parseString(apiResp).getAsJsonObject();
+                String finalUrl = resJson.has("url") ? resJson.get("url").getAsString() : "";
                 if (!finalUrl.isEmpty()) {
-                    SpiderDebug.step("8. 解析成功", "最终播放地址: " + finalUrl);
+                    SpiderDebug.log("=== [6.解析成功] 播放地址: " + finalUrl);
                     return Result.get().url(finalUrl).string();
                 }
             }
@@ -253,6 +219,7 @@ public class Qkys extends Spider {
 
         return Result.get().parse(1).url(playUrl).string();
     }
+
 
 
     private int findJsonEnd(String text, int start) {
