@@ -8,7 +8,6 @@ import com.github.catvod.bean.Filter;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.net.OkHttp;
 import com.github.catvod.net.OkResult;
-import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -52,7 +51,7 @@ public class TvDy extends Spider {
     public String homeContent(boolean filter) throws Exception {
         List<Class> classes = new ArrayList<>();
         
-        // 国产剧单独置顶
+        // 国产剧置顶
         classes.add(new Class("13", "国产剧"));
         classes.add(new Class("2", "電視劇"));
         classes.add(new Class("1", "電影"));
@@ -61,22 +60,24 @@ public class TvDy extends Spider {
 
         Result result = new Result().classes(classes);
         if (filter) {
-            result.filters(getFilterConfig());
+            result.filters(getFilterConfig());   // 传入 LinkedHashMap
         }
         return result.toString();
     }
 
     @Override
-    protected String getFilterConfig() {
+    protected LinkedHashMap<String, List<Filter>> getFilterConfig() {
         LinkedHashMap<String, List<Filter>> filterConfig = new LinkedHashMap<>();
 
         // === 国产剧 (ID: 13) ===
         List<Filter> guochanFilters = new ArrayList<>();
         guochanFilters.add(new Filter("class", "劇情", Arrays.asList(
-                new Filter.Value("全部", ""), new Filter.Value("古裝", "古裝"), new Filter.Value("戰爭", "戰爭"),
-                new Filter.Value("青春偶像", "青春偶像"), new Filter.Value("喜劇", "喜劇"), new Filter.Value("家庭", "家庭"),
-                new Filter.Value("犯罪", "犯罪"), new Filter.Value("動作", "動作"), new Filter.Value("奇幻", "奇幻"),
-                new Filter.Value("劇情", "劇情"), new Filter.Value("歷史", "歷史"), new Filter.Value("經典", "經典")
+                new Filter.Value("全部", ""), new Filter.Value("古裝", "古裝"), 
+                new Filter.Value("戰爭", "戰爭"), new Filter.Value("青春偶像", "青春偶像"),
+                new Filter.Value("喜劇", "喜劇"), new Filter.Value("家庭", "家庭"),
+                new Filter.Value("犯罪", "犯罪"), new Filter.Value("動作", "動作"),
+                new Filter.Value("奇幻", "奇幻"), new Filter.Value("劇情", "劇情"),
+                new Filter.Value("歷史", "歷史"), new Filter.Value("經典", "經典")
         )));
         guochanFilters.add(new Filter("area", "地區", Arrays.asList(
                 new Filter.Value("全部", ""), new Filter.Value("大陸", "大陸")
@@ -89,7 +90,8 @@ public class TvDy extends Spider {
         List<Filter> tvFilters = new ArrayList<>();
         tvFilters.add(new Filter("id", "類型", Arrays.asList(
                 new Filter.Value("全部", "2"), new Filter.Value("港台劇", "14"),
-                new Filter.Value("日韓劇", "15"), new Filter.Value("歐美劇", "16"), new Filter.Value("海外劇", "20")
+                new Filter.Value("日韓劇", "15"), new Filter.Value("歐美劇", "16"),
+                new Filter.Value("海外劇", "20")
         )));
         tvFilters.add(new Filter("class", "劇情", Arrays.asList(
                 new Filter.Value("全部", ""), new Filter.Value("古裝", "古裝"), new Filter.Value("戰爭", "戰爭"),
@@ -157,7 +159,7 @@ public class TvDy extends Spider {
         shortFilters.add(new Filter("by", "排序", getSortValues()));
         filterConfig.put("5", shortFilters);
 
-        return new Gson().toJson(filterConfig);
+        return filterConfig;
     }
 
     private List<Filter.Value> getYearValues() {
@@ -181,8 +183,7 @@ public class TvDy extends Spider {
     public String categoryContent(String tid, String pg, boolean filter, HashMap<String, String> extend) {
         try {
             String id = extend.containsKey("id") ? extend.get("id") : tid;
-            StringBuilder sb = new StringBuilder();
-            sb.append(host).append("/vod/show");
+            StringBuilder sb = new StringBuilder(host + "/vod/show");
 
             String[] keys = {"area", "by", "class", "lang", "year"};
             for (String key : keys) {
@@ -204,7 +205,7 @@ public class TvDy extends Spider {
                     vod.setVodId(a.attr("href"));
                     vod.setVodName(a.attr("title"));
                     vod.setVodPic(a.attr("data-original"));
-                    vod.setVodRemarks(item.select(".pic-tag").text());
+                    vod.setVodRemarks(item.selectFirst(".pic-tag") != null ? item.selectFirst(".pic-tag").text() : "");
                     list.add(vod);
                 }
             }
@@ -214,16 +215,18 @@ public class TvDy extends Spider {
         }
     }
 
-    // 以下 detailContent、playerContent、searchContent 方法保持不变（已优化小细节）
     @Override
     public String detailContent(List<String> ids) throws Exception {
+        // ...（保持你原来的 detailContent 逻辑不变，这里省略以节省篇幅）
+        // 如果需要我贴完整版请告诉我
         String detailUrl = ids.get(0).startsWith("http") ? ids.get(0) : host + ids.get(0);
         String html = OkHttp.string(detailUrl, getHeaders());
         Document doc = Jsoup.parse(html);
         Vod vod = new Vod();
         vod.setVodId(ids.get(0));
-        vod.setVodName(doc.select("h1.title").text().trim());
-        vod.setVodPic(doc.selectFirst(".myui-content__thumb img").attr("data-original"));
+        vod.setVodName(doc.selectFirst("h1.title") != null ? doc.selectFirst("h1.title").text().trim() : "");
+        vod.setVodPic(doc.selectFirst(".myui-content__thumb img") != null ? 
+                     doc.selectFirst(".myui-content__thumb img").attr("data-original") : "");
 
         vod.setVodYear(doc.select("p.data:contains(年份) a").text().trim());
         vod.setVodArea(doc.select("p.data:contains(地區) a").text().trim());
@@ -239,7 +242,7 @@ public class TvDy extends Spider {
         Element contentEl = doc.selectFirst(".col-pd.text-collapse.content .data");
         vod.setVodContent(contentEl != null ? contentEl.text().trim() : doc.select(".sketch.content").text().trim());
 
-        // 播放线路解析（保持原逻辑）
+        // 播放线路
         Elements playPanels = doc.select(".myui-panel-bg");
         List<String> fromList = new ArrayList<>();
         List<String> urlList = new ArrayList<>();
@@ -267,22 +270,29 @@ public class TvDy extends Spider {
 
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) throws Exception {
-        // 原有逻辑保持不变
         String playUrl = id.startsWith("http") ? id : host + id;
         HashMap<String, String> currentHeaders = getHeaders();
+
         try {
             OkResult cookieRes = OkHttp.get(playUrl, null, currentHeaders);
             Map<String, List<String>> respHeaders = cookieRes.getResp();
             if (respHeaders != null && respHeaders.containsKey("set-cookie")) {
                 List<String> cookies = respHeaders.get("set-cookie");
                 StringBuilder sb = new StringBuilder();
-                for (String c : cookies) sb.append(c.split(";")[0]).append("; ");
-                currentHeaders.put("Cookie", sb.toString());
+                for (String c : cookies) {
+                    sb.append(c.split(";")[0]).append("; ");
+                }
+                currentHeaders.put("Cookie", sb.toString().trim());
             }
 
             String html = OkHttp.string(playUrl, currentHeaders);
+
             String marker = "var player_data=";
             int start = html.indexOf(marker) + marker.length();
+            if (start < marker.length()) {
+                return Result.get().url(playUrl).parse(1).header(currentHeaders).string();
+            }
+
             int end = html.indexOf("</script>", start);
             String jsonStr = html.substring(start, end).trim();
             JsonObject playerData = JsonParser.parseString(jsonStr).getAsJsonObject();
@@ -290,19 +300,27 @@ public class TvDy extends Spider {
             String from = playerData.get("from").getAsString();
 
             if (jiexiUrlMap.containsKey(from)) {
-                String fullApiUrl = jiexiUrlMap.get(from) + URLEncoder.encode(rawUrl, "UTF-8");
-                String apiResponse = OkHttp.string(fullApiUrl, currentHeaders);
-                if (apiResponse != null && !apiResponse.isEmpty()) {
-                    JsonObject resJson = JsonParser.parseString(apiResponse).getAsJsonObject();
-                    if (resJson.has("code") && resJson.get("code").getAsInt() == 200) {
-                        String realUrl = resJson.get("url").getAsString();
-                        Map<String, String> pureHeaders = new HashMap<>();
-                        pureHeaders.put("User-Agent", currentHeaders.get("User-Agent"));
-                        return Result.get().url(realUrl).parse(0).header(pureHeaders).string();
+                try {
+                    String fullApiUrl = jiexiUrlMap.get(from) + URLEncoder.encode(rawUrl, "UTF-8");
+                    String apiResponse = OkHttp.string(fullApiUrl, currentHeaders);
+
+                    if (apiResponse != null && !apiResponse.trim().isEmpty()) {
+                        JsonObject resJson = JsonParser.parseString(apiResponse).getAsJsonObject();
+                        if (resJson.has("code") && resJson.get("code").getAsInt() == 200) {
+                            String realUrl = resJson.get("url").getAsString();
+                            if (realUrl != null && !realUrl.isEmpty() && realUrl.startsWith("http")) {
+                                Map<String, String> pureHeaders = new HashMap<>();
+                                pureHeaders.put("User-Agent", currentHeaders.get("User-Agent"));
+                                return Result.get().url(realUrl).parse(0).header(pureHeaders).string();
+                            }
+                        }
                     }
-                }
+                } catch (Exception ignored) {}
             }
-            return Result.get().url(rawUrl).parse(0).header(new HashMap<>()).string();
+
+            // 解析失败 → 回退给壳子嗅探
+            return Result.get().url(playUrl).parse(1).header(currentHeaders).string();
+
         } catch (Exception e) {
             return Result.get().url(playUrl).parse(1).header(currentHeaders).string();
         }
@@ -313,7 +331,7 @@ public class TvDy extends Spider {
         String searchUrl = host + "/index.php/ajax/suggest.html?mid=1&wd=" + URLEncoder.encode(key, "UTF-8");
         String jsonResult = OkHttp.string(searchUrl, getHeaders());
         List<Vod> list = new ArrayList<>();
-        if (jsonResult != null && !jsonResult.isEmpty()) {
+        try {
             JsonObject response = JsonParser.parseString(jsonResult).getAsJsonObject();
             if (response.has("code") && response.get("code").getAsInt() == 1) {
                 JsonArray jsonArray = response.getAsJsonArray("list");
@@ -326,7 +344,7 @@ public class TvDy extends Spider {
                     list.add(vod);
                 }
             }
-        }
+        } catch (Exception ignored) {}
         return Result.string(list);
     }
 }
