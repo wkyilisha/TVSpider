@@ -83,29 +83,69 @@ public class TvDy extends Spider {
 
         Vod vod = new Vod();
         vod.setVodId(ids.get(0));
-        vod.setVodName(doc.select("h1.title").text());
+        // 定位標題
+        vod.setVodName(doc.select("h1.title").text().trim());
+        // 定位圖片
         vod.setVodPic(doc.selectFirst(".myui-content__thumb img").attr("data-original"));
-        vod.setVodContent(doc.select(".sketch.content").text().trim());
+        
+        // --- 精準定位開始 ---
+        
+        // 1. 年份：定位包含“年份：”的 p.data 標籤下的 a 標籤文字
+        vod.setVodYear(doc.select("p.data:contains(年份) a").text().trim());
+        
+        // 2. 地區：定位包含“地區：”的 p.data 標籤下的 a 標籤文字
+        vod.setVodArea(doc.select("p.data:contains(地區) a").text().trim());
+        
+        // 3. 主演：提取所有主演 a 標籤的文字，並用逗號連接
+        Elements actors = doc.select("p.data:contains(主演) a");
+        List<String> actorList = new ArrayList<>();
+        for (Element a : actors) actorList.add(a.text());
+        vod.setVodActor(TextUtils.join(", ", actorList));
+        
+        // 4. 導演：提取導演 a 標籤文字
+        vod.setVodDirector(doc.select("p.data:contains(導演) a").text().trim());
+        
+        // 5. 更新備註：提取包含“更新：”標籤後的紅色文字內容
+        vod.setVodRemarks(doc.select("p.data:contains(更新) .text-red").text().trim());
+        
+        // 6. 簡介：定位劇情簡介面板下的全量內容（排除隱藏屬性）
+        Element contentEl = doc.selectFirst(".col-pd.text-collapse.content .data");
+        if (contentEl != null) {
+            vod.setVodContent(contentEl.text().trim());
+        } else {
+            vod.setVodContent(doc.select(".sketch.content").text().trim());
+        }
 
+        // --- 播放線路解析 ---
         Elements playPanels = doc.select(".myui-panel-bg");
         List<String> fromList = new ArrayList<>();
         List<String> urlList = new ArrayList<>();
 
         for (Element panel : playPanels) {
+            // 只抓取包含播放列表的面板
             Element head = panel.selectFirst(".myui-panel__head h3.title");
-            if (head == null || !head.text().contains("线路")) continue;
+            if (head == null) continue;
+            
+            String fromName = head.text().trim();
+            // 過濾掉“劇情簡介”等非播放線路面板
+            if (fromName.contains("劇情") || fromName.contains("猜你喜歡")) continue;
+
             Elements nameUrls = panel.select("ul.myui-content__list a");
             if (nameUrls.isEmpty()) continue;
-            List<String> urls = new ArrayList<>();
-            for (Element urlItem : nameUrls) urls.add(urlItem.text() + "$" + urlItem.attr("href"));
             
-            fromList.add(head.text().trim());
-            // 【修复点2】改用 TextUtils.join
+            List<String> urls = new ArrayList<>();
+            for (Element urlItem : nameUrls) {
+                // 格式：第01集$播放地址
+                urls.add(urlItem.text() + "$" + urlItem.attr("href"));
+            }
+            
+            fromList.add(fromName);
             urlList.add(TextUtils.join("#", urls));
         }
 
         vod.setVodPlayFrom(TextUtils.join("$$$", fromList));
         vod.setVodPlayUrl(TextUtils.join("$$$", urlList));
+        
         return Result.string(vod);
     }
 
