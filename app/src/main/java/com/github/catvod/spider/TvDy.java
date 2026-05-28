@@ -4,6 +4,7 @@ import android.text.TextUtils;
 import com.github.catvod.bean.Class;
 import com.github.catvod.bean.Result;
 import com.github.catvod.bean.Vod;
+import com.github.catvod.bean.Filter;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderDebug;
 import com.github.catvod.net.OkHttp;
@@ -49,30 +50,154 @@ public class TvDy extends Spider {
     @Override
     public String homeContent(boolean filter) throws Exception {
         List<Class> classes = new ArrayList<>();
-        String[][] categoryList = {{"电影", "1"}, {"电视剧", "2"}, {"综艺", "3"}, {"短剧", "5"}};
-        for (String[] cls : categoryList) classes.add(new Class(cls[1], cls[0]));
-        // 【修复点1】明确指定 null 的类型为 JSONObject
-        return Result.string(classes, (JSONObject) null);
+        // 順序：電視劇(含國產劇)放在第一位
+        classes.add(new Class("2", "電視劇"));
+        classes.add(new Class("1", "電影"));
+        classes.add(new Class("3", "綜藝"));
+        classes.add(new Class("5", "短劇"));
+
+        Result result = new Result().classes(classes);
+        if (filter) {
+            result.filters(getFilterConfig());
+        }
+        return result.toString();
     }
 
     @Override
-    public String categoryContent(String tid, String pg, boolean filter, HashMap<String, String> extend) throws Exception {
-        String targetUrl = host + "/vod/show/id/" + tid + "/page/" + pg + ".html";
-        String html = OkHttp.string(targetUrl, getHeaders());
-        Document doc = Jsoup.parse(html);
-        List<Vod> list = new ArrayList<>();
-        Elements items = doc.select(".myui-vodlist li");
-        for (Element item : items) {
-            Element a = item.selectFirst("a.myui-vodlist__thumb");
-            if (a == null) continue;
-            Vod vod = new Vod();
-            vod.setVodId(a.attr("href"));
-            vod.setVodName(a.attr("title"));
-            vod.setVodPic(a.attr("data-original"));
-            vod.setVodRemarks(item.select(".pic-tag").text());
-            list.add(vod);
+    protected String getFilterConfig() {
+        LinkedHashMap<String, List<Filter>> filterConfig = new LinkedHashMap<>();
+
+        // --- 1. 電視劇 (ID: 2) ---
+        List<Filter> tvFilters = new ArrayList<>();
+        tvFilters.add(new Filter("id", "類型", Arrays.asList(
+                new Filter.Value("國產劇", "13"),
+                new Filter.Value("全部", "2"),
+                new Filter.Value("港台劇", "14"),
+                new Filter.Value("日韓劇", "15"),
+                new Filter.Value("歐美劇", "16"),
+                new Filter.Value("海外劇", "20")
+        )));
+        tvFilters.add(new Filter("class", "劇情", Arrays.asList(
+                new Filter.Value("全部", ""), new Filter.Value("古裝", "古裝"), new Filter.Value("戰爭", "戰爭"),
+                new Filter.Value("青春偶像", "青春偶像"), new Filter.Value("喜劇", "喜劇"), new Filter.Value("家庭", "家庭"),
+                new Filter.Value("犯罪", "犯罪"), new Filter.Value("動作", "動作"), new Filter.Value("奇幻", "奇幻"),
+                new Filter.Value("劇情", "劇情"), new Filter.Value("歷史", "歷史"), new Filter.Value("經典", "經典")
+        )));
+        tvFilters.add(new Filter("area", "地區", Arrays.asList(
+                new Filter.Value("全部", ""), new Filter.Value("大陸", "大陸"), new Filter.Value("香港", "香港"),
+                new Filter.Value("韓國", "韓國"), new Filter.Value("台灣", "台灣"), new Filter.Value("日本", "日本"),
+                new Filter.Value("美國", "美國"), new Filter.Value("泰國", "泰國"), new Filter.Value("英國", "英國"),
+                new Filter.Value("新加坡", "新加坡"), new Filter.Value("其他", "其他")
+        )));
+        tvFilters.add(new Filter("year", "年份", getYearValues()));
+        tvFilters.add(new Filter("by", "排序", getSortValues()));
+        filterConfig.put("2", tvFilters);
+
+        // --- 2. 電影 (ID: 1) ---
+        List<Filter> movieFilters = new ArrayList<>();
+        movieFilters.add(new Filter("id", "類型", Arrays.asList(
+                new Filter.Value("全部", "1"),
+                new Filter.Value("動作片", "6"), new Filter.Value("喜劇片", "7"), new Filter.Value("愛情片", "8"),
+                new Filter.Value("科幻片", "9"), new Filter.Value("劇情片", "10"), new Filter.Value("恐怖片", "11"),
+                new Filter.Value("戰爭片", "12")
+        )));
+        movieFilters.add(new Filter("class", "劇情", Arrays.asList(
+                new Filter.Value("全部", ""), new Filter.Value("喜劇", "喜劇"), new Filter.Value("愛情", "愛情"),
+                new Filter.Value("恐怖", "恐怖"), new Filter.Value("動作", "動作"), new Filter.Value("科幻", "科幻"),
+                new Filter.Value("劇情", "劇情"), new Filter.Value("戰爭", "戰爭"), new Filter.Value("警匪", "警匪"),
+                new Filter.Value("犯罪", "犯罪"), new Filter.Value("動畫", "動畫"), new Filter.Value("奇幻", "奇幻"),
+                new Filter.Value("武俠", "武俠"), new Filter.Value("冒險", "冒險"), new Filter.Value("懸疑", "懸疑")
+        )));
+        movieFilters.add(new Filter("area", "地區", Arrays.asList(
+                new Filter.Value("全部", ""), new Filter.Value("大陸", "大陸"), new Filter.Value("香港", "香港"),
+                new Filter.Value("台灣", "台灣"), new Filter.Value("美國", "美國"), new Filter.Value("法國", "法國"),
+                new Filter.Value("英國", "英國"), new Filter.Value("日本", "日本"), new Filter.Value("韓國", "韓國"),
+                new Filter.Value("德國", "德國"), new Filter.Value("泰國", "泰國"), new Filter.Value("印度", "印度")
+        )));
+        movieFilters.add(new Filter("year", "年份", getYearValues()));
+        movieFilters.add(new Filter("by", "排序", getSortValues()));
+        filterConfig.put("1", movieFilters);
+
+        // --- 3. 綜藝 (ID: 3) ---
+        List<Filter> varietyFilters = new ArrayList<>();
+        varietyFilters.add(new Filter("id", "類型", Arrays.asList(
+                new Filter.Value("全部", "3"),
+                new Filter.Value("大陸綜藝", "21"), new Filter.Value("香港綜藝", "22"),
+                new Filter.Value("日韓綜藝", "23"), new Filter.Value("歐美綜藝", "24")
+        )));
+        varietyFilters.add(new Filter("class", "劇情", Arrays.asList(
+                new Filter.Value("全部", ""), new Filter.Value("選秀", "選秀"), new Filter.Value("情感", "情感"),
+                new Filter.Value("訪談", "訪談"), new Filter.Value("旅遊", "旅遊"), new Filter.Value("音樂", "音樂"),
+                new Filter.Value("美食", "美食"), new Filter.Value("紀實", "紀實"), new Filter.Value("遊戲", "遊戲")
+        )));
+        varietyFilters.add(new Filter("year", "年份", getYearValues()));
+        varietyFilters.add(new Filter("by", "排序", getSortValues()));
+        filterConfig.put("3", varietyFilters);
+
+        // --- 5. 短劇 (ID: 5) ---
+        List<Filter> shortFilters = new ArrayList<>();
+        shortFilters.add(new Filter("class", "劇情", Arrays.asList(
+                new Filter.Value("全部", ""), new Filter.Value("喜劇", "喜劇"), new Filter.Value("愛情", "愛情"),
+                new Filter.Value("動作", "動作"), new Filter.Value("古裝", "古裝"), new Filter.Value("都市", "都市"),
+                new Filter.Value("懸疑", "懸疑"), new Filter.Value("玄幻", "玄幻")
+        )));
+        shortFilters.add(new Filter("year", "年份", getYearValues()));
+        shortFilters.add(new Filter("by", "排序", getSortValues()));
+        filterConfig.put("5", shortFilters);
+
+        return new Gson().toJson(filterConfig);
+    }
+
+    private List<Filter.Value> getYearValues() {
+        List<Filter.Value> values = new ArrayList<>();
+        values.add(new Filter.Value("全部", ""));
+        for (int i = 2026; i >= 2001; i--) {
+            values.add(new Filter.Value(String.valueOf(i), String.valueOf(i)));
         }
-        return Result.string(list);
+        return values;
+    }
+
+    private List<Filter.Value> getSortValues() {
+        return Arrays.asList(
+                new Filter.Value("時間", "time"),
+                new Filter.Value("人氣", "hits"),
+                new Filter.Value("評分", "score")
+        );
+    }
+
+    @Override
+    public String categoryContent(String tid, String pg, boolean filter, HashMap<String, String> extend) {
+        try {
+            String id = extend.containsKey("id") ? extend.get("id") : tid;
+            StringBuilder sb = new StringBuilder();
+            sb.append(host).append("/vod/show");
+
+            // 嚴格按照網站 URL 路徑順序拼接
+            String[] keys = {"area", "by", "class", "lang", "year"};
+            for (String key : keys) {
+                if (extend.containsKey(key) && !extend.get(key).isEmpty()) {
+                    sb.append("/").append(key).append("/").append(URLEncoder.encode(extend.get(key), "UTF-8"));
+                }
+            }
+            sb.append("/id/").append(id).append("/page/").append(pg).append(".html");
+
+            String html = OkHttp.string(sb.toString(), getHeaders());
+            Document doc = Jsoup.parse(html);
+            List<Vod> list = new ArrayList<>();
+            Elements items = doc.select(".myui-vodlist li");
+            for (Element item : items) {
+                Vod vod = new Vod();
+                Element a = item.selectFirst("a.myui-vodlist__thumb");
+                vod.setVodId(a.attr("href"));
+                vod.setVodName(a.attr("title"));
+                vod.setVodPic(a.attr("data-original"));
+                vod.setVodRemarks(item.select(".pic-tag").text());
+                list.add(vod);
+            }
+            return Result.string(list);
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     @Override
