@@ -22,7 +22,7 @@ import android.util.Base64;
 
 public class TvDy extends Spider {
 
-    private static final String siteUrl = "https://www.tvdy.xyz";
+    private static final String siteUrl = "http://www.viptvb08.com";
     private static final String cateUrl = siteUrl + "/search.php?tid=";
     private static final String detailUrl = siteUrl + "/movie/";
     private static final String searchUrl = siteUrl + "/search.php?searchword=";
