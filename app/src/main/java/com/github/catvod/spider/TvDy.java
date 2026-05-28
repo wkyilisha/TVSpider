@@ -51,7 +51,6 @@ public class TvDy extends Spider {
     public String homeContent(boolean filter) throws Exception {
         List<Class> classes = new ArrayList<>();
         
-        // 国产剧置顶
         classes.add(new Class("13", "国产剧"));
         classes.add(new Class("2", "電視劇"));
         classes.add(new Class("1", "電影"));
@@ -60,19 +59,19 @@ public class TvDy extends Spider {
 
         Result result = new Result().classes(classes);
         if (filter) {
-            result.filters(getFilterConfig());   // 传入 LinkedHashMap
+            result.filters(getFilterConfig());
         }
         return result.toString();
     }
 
-    @Override
+    // 【已移除 @Override】
     protected LinkedHashMap<String, List<Filter>> getFilterConfig() {
         LinkedHashMap<String, List<Filter>> filterConfig = new LinkedHashMap<>();
 
-        // === 国产剧 (ID: 13) ===
+        // 国产剧 (13)
         List<Filter> guochanFilters = new ArrayList<>();
         guochanFilters.add(new Filter("class", "劇情", Arrays.asList(
-                new Filter.Value("全部", ""), new Filter.Value("古裝", "古裝"), 
+                new Filter.Value("全部", ""), new Filter.Value("古裝", "古裝"),
                 new Filter.Value("戰爭", "戰爭"), new Filter.Value("青春偶像", "青春偶像"),
                 new Filter.Value("喜劇", "喜劇"), new Filter.Value("家庭", "家庭"),
                 new Filter.Value("犯罪", "犯罪"), new Filter.Value("動作", "動作"),
@@ -86,7 +85,7 @@ public class TvDy extends Spider {
         guochanFilters.add(new Filter("by", "排序", getSortValues()));
         filterConfig.put("13", guochanFilters);
 
-        // === 電視劇 (ID: 2) ===
+        // 電視劇 (2)
         List<Filter> tvFilters = new ArrayList<>();
         tvFilters.add(new Filter("id", "類型", Arrays.asList(
                 new Filter.Value("全部", "2"), new Filter.Value("港台劇", "14"),
@@ -109,7 +108,7 @@ public class TvDy extends Spider {
         tvFilters.add(new Filter("by", "排序", getSortValues()));
         filterConfig.put("2", tvFilters);
 
-        // === 電影 (ID: 1) ===
+        // 電影 (1)
         List<Filter> movieFilters = new ArrayList<>();
         movieFilters.add(new Filter("id", "類型", Arrays.asList(
                 new Filter.Value("全部", "1"), new Filter.Value("動作片", "6"), new Filter.Value("喜劇片", "7"),
@@ -132,7 +131,7 @@ public class TvDy extends Spider {
         movieFilters.add(new Filter("by", "排序", getSortValues()));
         filterConfig.put("1", movieFilters);
 
-        // === 綜藝 (ID: 3) ===
+        // 綜藝 (3)
         List<Filter> varietyFilters = new ArrayList<>();
         varietyFilters.add(new Filter("id", "類型", Arrays.asList(
                 new Filter.Value("全部", "3"), new Filter.Value("大陸綜藝", "21"),
@@ -148,7 +147,7 @@ public class TvDy extends Spider {
         varietyFilters.add(new Filter("by", "排序", getSortValues()));
         filterConfig.put("3", varietyFilters);
 
-        // === 短劇 (ID: 5) ===
+        // 短劇 (5)
         List<Filter> shortFilters = new ArrayList<>();
         shortFilters.add(new Filter("class", "劇情", Arrays.asList(
                 new Filter.Value("全部", ""), new Filter.Value("喜劇", "喜劇"), new Filter.Value("愛情", "愛情"),
@@ -217,8 +216,6 @@ public class TvDy extends Spider {
 
     @Override
     public String detailContent(List<String> ids) throws Exception {
-        // ...（保持你原来的 detailContent 逻辑不变，这里省略以节省篇幅）
-        // 如果需要我贴完整版请告诉我
         String detailUrl = ids.get(0).startsWith("http") ? ids.get(0) : host + ids.get(0);
         String html = OkHttp.string(detailUrl, getHeaders());
         Document doc = Jsoup.parse(html);
@@ -242,7 +239,6 @@ public class TvDy extends Spider {
         Element contentEl = doc.selectFirst(".col-pd.text-collapse.content .data");
         vod.setVodContent(contentEl != null ? contentEl.text().trim() : doc.select(".sketch.content").text().trim());
 
-        // 播放线路
         Elements playPanels = doc.select(".myui-panel-bg");
         List<String> fromList = new ArrayList<>();
         List<String> urlList = new ArrayList<>();
@@ -303,7 +299,6 @@ public class TvDy extends Spider {
                 try {
                     String fullApiUrl = jiexiUrlMap.get(from) + URLEncoder.encode(rawUrl, "UTF-8");
                     String apiResponse = OkHttp.string(fullApiUrl, currentHeaders);
-
                     if (apiResponse != null && !apiResponse.trim().isEmpty()) {
                         JsonObject resJson = JsonParser.parseString(apiResponse).getAsJsonObject();
                         if (resJson.has("code") && resJson.get("code").getAsInt() == 200) {
@@ -318,7 +313,6 @@ public class TvDy extends Spider {
                 } catch (Exception ignored) {}
             }
 
-            // 解析失败 → 回退给壳子嗅探
             return Result.get().url(playUrl).parse(1).header(currentHeaders).string();
 
         } catch (Exception e) {
