@@ -23,6 +23,7 @@ import org.jsoup.nodes.Element;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.net.URLEncoder;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -45,65 +46,6 @@ public class PPnix extends Spider {
         h.put("Origin", HOST);
         if (!TextUtils.isEmpty(cfCookie)) h.put("Cookie", cfCookie);
         return h;
-    }
-
-    // =========================
-    // m3u8本地化（核心）
-    // =========================
-    private String processM3u8(String m3u8Url, String referer) {
-
-        try {
-
-            String content = OkHttp.string(m3u8Url, baseHeaders(referer));
-            if (TextUtils.isEmpty(content)) return null;
-
-            Random rnd = new Random();
-            int hostNum = rnd.nextInt(16) + 1;
-
-            StringBuilder sb = new StringBuilder();
-
-            String baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf("/") + 1);
-
-            for (String raw : content.split("\n")) {
-
-                String line = raw.trim();
-
-                if (line.startsWith("#")) {
-                    sb.append(raw).append("\n");
-                    continue;
-                }
-
-                if (line.isEmpty()) {
-                    sb.append("\n");
-                    continue;
-                }
-
-                if (!line.startsWith("http")) {
-                    line = baseUrl + line;
-                }
-
-                if (line.contains("ipfs.ppnix.com")) {
-                    line = line.replace("ipfs.ppnix.com", hostNum + ".ppnix.com");
-                }
-
-                sb.append(line).append("\n");
-            }
-
-            File file = new File(
-                    Init.context().getCacheDir(),
-                    "ppnix_" + System.currentTimeMillis() + ".m3u8"
-            );
-
-            FileOutputStream fos = new FileOutputStream(file);
-            fos.write(sb.toString().getBytes("UTF-8"));
-            fos.close();
-
-            return "file://" + file.getAbsolutePath();
-
-        } catch (Exception e) {
-            logger("m3u8 error: " + e.getMessage());
-            return null;
-        }
     }
 
     // =========================
@@ -218,7 +160,7 @@ public class PPnix extends Spider {
     }
 
     // =========================
-    // 播放（核心）
+    // 播放（走Proxy本地代理）
     // =========================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
@@ -227,22 +169,18 @@ public class PPnix extends Spider {
 
             String originalUrl = id.startsWith("http") ? id : HOST + id;
 
-            String referer = HOST + "/";
-
-            String finalUrl = processM3u8(originalUrl, referer);
-
-            if (TextUtils.isEmpty(finalUrl)) {
-                finalUrl = originalUrl;
-            }
+            // 交给Proxy的 ?do=m3u8&url= 进行域名随机替换后返回给播放器
+            String proxyUrl = Proxy.getUrl() + "?do=m3u8&url=" + URLEncoder.encode(originalUrl, "UTF-8");
 
             Map<String, String> headers = new HashMap<>();
             headers.put("User-Agent", UA);
-            headers.put("Referer", referer);
+            headers.put("Referer", HOST + "/");
+            headers.put("Origin", HOST);
 
-            return Result.get().url(finalUrl).header(headers).string();
+            return Result.get().url(proxyUrl).header(headers).string();
 
         } catch (Exception e) {
-
+            logger("❌ 播放失败: " + e.getMessage());
             return Result.get().url(id).string();
         }
     }
