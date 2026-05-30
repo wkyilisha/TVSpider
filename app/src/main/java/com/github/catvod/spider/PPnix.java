@@ -1,13 +1,21 @@
 package com.github.catvod.spider;
 
+import android.app.AlertDialog;
 import android.content.Context;
 import android.text.TextUtils;
+import android.view.ViewGroup;
+import android.webkit.CookieManager;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 
 import com.github.catvod.bean.Class;
 import com.github.catvod.bean.Result;
 import com.github.catvod.bean.Vod;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.net.OkHttp;
+import com.github.catvod.utils.Notify;
+import com.github.catvod.utils.ResUtil;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -40,30 +48,24 @@ public class PPnix extends Spider {
     }
 
     // =========================
-    // init — 去掉弹窗，主动启动Proxy服务器
-    // =========================
-    @Override
-    public void init(Context context, String extend) {
-        // 主动触发Proxy服务器启动，不弹任何窗口
-        Proxy.log("PPnix 插件加载成功");
-    }
-
-    // =========================
     // m3u8本地化（核心）
     // =========================
     private String processM3u8(String m3u8Url, String referer) {
+
         try {
+
             String content = OkHttp.string(m3u8Url, baseHeaders(referer));
             if (TextUtils.isEmpty(content)) return null;
 
             Random rnd = new Random();
-            int hostNum = rnd.nextInt(16) + 1; // 1~16，整个m3u8用同一个随机域名
+            int hostNum = rnd.nextInt(16) + 1;
 
             StringBuilder sb = new StringBuilder();
+
             String baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf("/") + 1);
-            int replaceCount = 0;
 
             for (String raw : content.split("\n")) {
+
                 String line = raw.trim();
 
                 if (line.startsWith("#")) {
@@ -76,27 +78,22 @@ public class PPnix extends Spider {
                     continue;
                 }
 
-                // 相对路径转绝对路径
                 if (!line.startsWith("http")) {
                     line = baseUrl + line;
                 }
 
-                // ipfs域名随机替换
                 if (line.contains("ipfs.ppnix.com")) {
                     line = line.replace("ipfs.ppnix.com", hostNum + ".ppnix.com");
-                    replaceCount++;
                 }
 
                 sb.append(line).append("\n");
             }
 
-            logger("✅ m3u8处理完成，共替换 " + replaceCount + " 个TS域名 → " + hostNum + ".ppnix.com");
-
-            // 写入本地缓存文件
             File file = new File(
                     Init.context().getCacheDir(),
                     "ppnix_" + System.currentTimeMillis() + ".m3u8"
             );
+
             FileOutputStream fos = new FileOutputStream(file);
             fos.write(sb.toString().getBytes("UTF-8"));
             fos.close();
@@ -104,13 +101,21 @@ public class PPnix extends Spider {
             return "file://" + file.getAbsolutePath();
 
         } catch (Exception e) {
-            logger("❌ m3u8处理失败: " + e.getMessage());
+            logger("m3u8 error: " + e.getMessage());
             return null;
         }
     }
 
     // =========================
-    // 首页分类
+    // init — 去掉弹窗，主动启动Proxy服务器
+    // =========================
+    @Override
+    public void init(Context context, String extend) {
+        Proxy.log("PPnix 插件加载成功");
+    }
+
+    // =========================
+    // 分类
     // =========================
     @Override
     public String homeContent(boolean filter) {
@@ -120,21 +125,18 @@ public class PPnix extends Spider {
         return Result.string(list, new ArrayList<>());
     }
 
-    // =========================
-    // 分类列表
-    // =========================
     @Override
     public String categoryContent(String tid, String pg, boolean filter, HashMap<String, String> extend) {
         try {
             int page = Integer.parseInt(pg) - 1;
             String url = String.format("%s/cn/%s/---%d-.html", HOST, tid, page);
-            logger("📄 分类请求: " + url);
-
             String html = OkHttp.string(url, baseHeaders(HOST + "/"));
+
             Document doc = Jsoup.parse(html);
             List<Vod> list = new ArrayList<>();
 
             for (Element li : doc.select(".lists-content ul li")) {
+
                 Element a = li.selectFirst("a.thumbnail");
                 if (a == null) continue;
 
@@ -147,71 +149,54 @@ public class PPnix extends Spider {
 
                 String pic = "";
                 Element img = a.selectFirst("img");
-                if (img != null) {
-                    pic = img.attr("src");
-                    if (TextUtils.isEmpty(pic)) pic = img.attr("data-src");
-                }
+                if (img != null) pic = img.attr("src");
 
                 Vod vod = new Vod();
                 vod.setVodId(id);
                 vod.setVodName(name);
                 vod.setVodPic(pic);
+
                 list.add(vod);
             }
 
-            logger("📦 分类结果: " + list.size() + " 条");
             return Result.string(list);
 
         } catch (Exception e) {
-            logger("❌ 分类失败: " + e.getMessage());
             return Result.string(new ArrayList<>());
         }
     }
 
     // =========================
-    // 详情页
+    // 详情
     // =========================
     @Override
     public String detailContent(List<String> ids) {
-        try {
-            String url = HOST + ids.get(0);
-            logger("🎬 详情请求: " + url);
 
+        try {
+
+            String url = HOST + ids.get(0);
             String html = OkHttp.string(url, baseHeaders(HOST + "/"));
+
             Document doc = Jsoup.parse(html);
 
             Vod vod = new Vod();
+
             String infoid = "";
             List<String> playUrls = new ArrayList<>();
 
             for (Element script : doc.select("script")) {
+
                 String data = script.data();
 
                 if (data.contains("infoid") && data.contains("m3u8")) {
-                    // 提取 infoid
+
                     Matcher m = Pattern.compile("infoid\\s*=\\s*(\\d+)").matcher(data);
                     if (m.find()) infoid = m.group(1);
 
-                    logger("🔑 infoid = " + infoid);
-
-                    // 提取集数数组，格式通常为 eps=[1,2,3] 或 eps=["1","2","3"]
-                    Matcher ep = Pattern.compile("eps\\s*=\\s*\\[([^\\]]+)\\]").matcher(data);
-                    if (ep.find()) {
-                        String[] parts = ep.group(1).split(",");
-                        for (String part : parts) {
-                            String e = part.trim().replaceAll("[\"'\\s]", "");
-                            if (!e.isEmpty() && !e.equals(infoid)) {
-                                // 拼接格式：显示名称$播放路径
-                                // playerContent收到的id就是 /info/m3u8/{infoid}/{e}.m3u8
-                                playUrls.add("第" + e + "集$/info/m3u8/" + infoid + "/" + e + ".m3u8");
-                            }
-                        }
-                    } else {
-                        // 兜底：如果找不到eps数组，尝试单集
-                        logger("⚠️ 未找到eps数组，尝试单集兜底");
-                        if (!infoid.isEmpty()) {
-                            playUrls.add("播放$/info/m3u8/" + infoid + "/1.m3u8");
-                        }
+                    Matcher ep = Pattern.compile("(\\d+)").matcher(data);
+                    while (ep.find()) {
+                        String e = ep.group(1);
+                        playUrls.add("第" + e + "集$/info/m3u8/" + infoid + "/" + e + ".m3u8");
                     }
                     break;
                 }
@@ -223,15 +208,11 @@ public class PPnix extends Spider {
             if (!playUrls.isEmpty()) {
                 vod.setVodPlayFrom("PPnix");
                 vod.setVodPlayUrl(TextUtils.join("#", playUrls));
-                logger("✅ 共解析 " + playUrls.size() + " 集");
-            } else {
-                logger("⚠️ 未解析到任何播放链接");
             }
 
             return Result.string(vod);
 
         } catch (Exception e) {
-            logger("❌ 详情失败: " + e.getMessage());
             return Result.string(new ArrayList<>());
         }
     }
@@ -241,19 +222,16 @@ public class PPnix extends Spider {
     // =========================
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
+
         try {
-            // id 格式：/info/m3u8/12345/1.m3u8
-            // 拼成完整URL：https://www.ppnix.com/info/m3u8/12345/1.m3u8
+
             String originalUrl = id.startsWith("http") ? id : HOST + id;
+
             String referer = HOST + "/";
 
-            logger("▶️ 播放请求: " + originalUrl);
-
-            // 下载m3u8并本地化（域名随机替换）
             String finalUrl = processM3u8(originalUrl, referer);
 
             if (TextUtils.isEmpty(finalUrl)) {
-                logger("⚠️ m3u8本地化失败，降级直接播放");
                 finalUrl = originalUrl;
             }
 
@@ -264,13 +242,13 @@ public class PPnix extends Spider {
             return Result.get().url(finalUrl).header(headers).string();
 
         } catch (Exception e) {
-            logger("❌ 播放失败: " + e.getMessage());
+
             return Result.get().url(id).string();
         }
     }
 
     // =========================
-    // 搜索（暂不支持）
+    // 搜索
     // =========================
     @Override
     public String searchContent(String key, boolean quick) {
