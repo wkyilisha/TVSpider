@@ -7,15 +7,19 @@ import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URLDecoder;
-import java.net.URLEncoder;
 import java.util.HashMap;
 import java.util.Map;
 
 public class Proxy extends Spider {
 
     private static StringBuilder sb = new StringBuilder("<div style='color:#888;'>--- 凱哥全能矩陣引擎已啟動 ---</div>");
-    private static boolean isServerRunning = false;
+    private static volatile boolean isServerRunning = false;
     private static final int PORT = 10086;
+
+    // 类加载时立即启动服务器，不依赖 log() 触发
+    static {
+        startServer();
+    }
 
     public static int getPort() { return PORT; }
     public static String getUrl() { return "http://127.0.0.1:" + PORT; }
@@ -26,10 +30,9 @@ public class Proxy extends Spider {
         String time = new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date());
         sb.append("<div class='line'><span class='time'>[").append(time).append("]</span> ")
           .append("<span class='msg'>").append(msg).append("</span></div>");
-        if (!isServerRunning) startServer();
     }
 
-    private static void startServer() {
+    private static synchronized void startServer() {
         if (isServerRunning) return;
         new Thread(() -> {
             try (ServerSocket server = new ServerSocket(PORT)) {
@@ -38,41 +41,55 @@ public class Proxy extends Spider {
                 log("✅ 10086 服务器启动成功");
 
                 while (true) {
-                    try (Socket client = server.accept()) {
-                        BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
-                        String reqLine = in.readLine();
-                        if (reqLine == null) continue;
-
-                        String path = reqLine.split(" ")[1];
-                        Map<String, String> params = parseParams(path);
-
-                        try (OutputStream out = client.getOutputStream()) {
-                            String doParam = params.get("do");
-
-                            if (path.contains("/?clean") || "clean".equals(doParam)) {
-                                sb.setLength(0);
-                                sb.append("<div style='color:red;'>--- 日誌已清空 ---</div>");
-                                out.write("HTTP/1.1 200 OK\r\n\r\nOK".getBytes());
-                            } else if (path.contains("/get_logs")) {
-                                String resp = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n" + sb.toString();
-                                out.write(resp.getBytes("UTF-8"));
-                            } else if ("livesource".equals(doParam) || "live".equals(doParam) || "iptv".equals(doParam)) {
-                                handleLiveSource(out);
-                            } else if ("m3u8".equals(doParam) || "rewrite".equals(doParam)) {
-                                handleM3U8Proxy(params, out);
-                            } else if ("stream".equals(doParam)) {
-                                handleSingleStream(params, out);
-                            } else {
-                                out.write(buildLogHtml().getBytes("UTF-8"));
-                            }
-                            out.flush();
-                        }
+                    try {
+                        Socket client = server.accept();
+                        // 每个请求开一个线程处理，避免阻塞
+                        new Thread(() -> handleClient(client)).start();
                     } catch (Exception ignored) {}
                 }
             } catch (Exception e) {
                 isServerRunning = false;
+                log("❌ 服务器启动失败: " + e.getMessage());
             }
         }).start();
+    }
+
+    private static void handleClient(Socket client) {
+        try {
+            client.setSoTimeout(15000);
+            BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
+            String reqLine = in.readLine();
+            if (reqLine == null) { client.close(); return; }
+
+            String path = reqLine.split(" ")[1];
+            Map<String, String> params = parseParams(path);
+
+            OutputStream out = client.getOutputStream();
+            String doParam = params.get("do");
+
+            if (path.contains("/?clean") || "clean".equals(doParam)) {
+                sb.setLength(0);
+                sb.append("<div style='color:red;'>--- 日誌已清空 ---</div>");
+                out.write("HTTP/1.1 200 OK\r\n\r\nOK".getBytes());
+            } else if (path.contains("/get_logs")) {
+                byte[] body = sb.toString().getBytes("UTF-8");
+                String header = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: " + body.length + "\r\n\r\n";
+                out.write(header.getBytes());
+                out.write(body);
+            } else if ("livesource".equals(doParam) || "live".equals(doParam) || "iptv".equals(doParam)) {
+                handleLiveSource(out);
+            } else if ("m3u8".equals(doParam) || "rewrite".equals(doParam)) {
+                handleM3U8Proxy(params, out);
+            } else if ("stream".equals(doParam)) {
+                handleSingleStream(params, out);
+            } else {
+                out.write(buildLogHtml().getBytes("UTF-8"));
+            }
+
+            out.flush();
+            client.shutdownOutput();
+            client.close();
+        } catch (Exception ignored) {}
     }
 
     private static Map<String, String> parseParams(String path) {
@@ -104,11 +121,10 @@ public class Proxy extends Spider {
                 "setInterval(()=>{fetch('/get_logs').then(r=>r.text()).then(d=>{if(d!==last){document.getElementById('logs').innerHTML=d;last=d;window.scrollTo(0,document.body.scrollHeight);}})},800);</script></body></html>";
     }
 
-    // ====================== 直播源（完全不修改） ======================
+    // ====================== 直播源 ======================
     private static void handleLiveSource(OutputStream out) throws Exception {
         String url = "https://gh-proxy.org/https://raw.githubusercontent.com/wkyilisha/tvbox/main/iptvpmigu.txt";
         log("📺 抓取直播源...");
-
         try {
             String content = OkHttp.string(url);
             if (content == null || content.trim().isEmpty()) {
@@ -117,15 +133,17 @@ public class Proxy extends Spider {
                 return;
             }
             log("✅ 直播源抓取成功 | 长度: " + content.length());
-            out.write("HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n".getBytes());
-            out.write(content.getBytes("UTF-8"));
+            byte[] body = content.getBytes("UTF-8");
+            String header = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: " + body.length + "\r\n\r\n";
+            out.write(header.getBytes());
+            out.write(body);
         } catch (Exception e) {
             log("❌ 直播源失败: " + e.getMessage());
             out.write("HTTP/1.1 502 Bad Gateway\r\n\r\nFetch failed".getBytes());
         }
     }
 
-    // ====================== m3u8 TS 域名随机替换 ======================
+    // ====================== m3u8 域名随机替换 ======================
     private static void handleM3U8Proxy(Map<String, String> params, OutputStream out) throws Exception {
         String m3u8Url = params.get("url");
         if (m3u8Url == null || m3u8Url.isEmpty()) {
@@ -137,10 +155,17 @@ public class Proxy extends Spider {
 
         try {
             String original = OkHttp.string(m3u8Url);
-            String rewritten = rewriteTsDomain(original, m3u8Url);
+            if (original == null || original.trim().isEmpty()) {
+                log("❌ m3u8 内容为空");
+                out.write("HTTP/1.1 502 Bad Gateway\r\n\r\nEmpty m3u8".getBytes());
+                return;
+            }
 
-            out.write("HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl; charset=utf-8\r\n\r\n".getBytes());
-            out.write(rewritten.getBytes("UTF-8"));
+            String rewritten = rewriteTsDomain(original, m3u8Url);
+            byte[] body = rewritten.getBytes("UTF-8");
+            String header = "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl; charset=utf-8\r\nContent-Length: " + body.length + "\r\n\r\n";
+            out.write(header.getBytes());
+            out.write(body);
             log("✅ m3u8 处理完成");
         } catch (Exception e) {
             log("❌ m3u8 处理失败: " + e.getMessage());
@@ -151,28 +176,38 @@ public class Proxy extends Spider {
     private static String rewriteTsDomain(String content, String baseUrl) {
         StringBuilder sb = new StringBuilder();
         java.util.Random random = new java.util.Random();
+        int replaceCount = 0;
+        // 整个m3u8用同一个随机域名
+        int rand = random.nextInt(16) + 1;
+        String newDomain = rand + ".ppnix.com";
 
         for (String line : content.split("\n")) {
             line = line.trim();
-            if (line.isEmpty()) { sb.append("\n"); continue; }
-            if (line.startsWith("#")) { sb.append(line).append("\n"); continue; }
 
-            if (line.contains(".ts") || line.matches(".*\\.ts\\?.*")) {
-                String fullTs = makeAbsoluteUrl(line, baseUrl);
-
-                if (fullTs.contains("ipfs.ppnix.com")) {
-                    int rand = random.nextInt(16) + 1;  // 1~16
-                    String newDomain = rand + ".ppnix.com";
-                    String replaced = fullTs.replace("ipfs.ppnix.com", newDomain);
-                    sb.append(replaced).append("\n");
-                    log("🔀 替换: ipfs.ppnix.com → " + newDomain);
-                } else {
-                    sb.append(fullTs).append("\n");
-                }
-            } else {
-                sb.append(line).append("\n");
+            if (line.isEmpty()) {
+                sb.append("\n");
+                continue;
             }
+
+            // 注释行原样保留
+            if (line.startsWith("#")) {
+                sb.append(line).append("\n");
+                continue;
+            }
+
+            // 非注释非空行，统一转成绝对路径
+            String fullUrl = makeAbsoluteUrl(line, baseUrl);
+
+            // 替换 ipfs.ppnix.com 域名（无论有没有 .ts 后缀）
+            if (fullUrl.contains("ipfs.ppnix.com")) {
+                fullUrl = fullUrl.replace("ipfs.ppnix.com", newDomain);
+                replaceCount++;
+            }
+
+            sb.append(fullUrl).append("\n");
         }
+
+        log("🔀 共替换 " + replaceCount + " 个片段域名 → " + newDomain);
         return sb.toString();
     }
 
@@ -185,7 +220,7 @@ public class Proxy extends Spider {
         }
     }
 
-    // ====================== 单 TS 代理 ======================
+    // ====================== 单片段代理（二进制安全） ======================
     private static void handleSingleStream(Map<String, String> params, OutputStream out) throws Exception {
         String url = params.get("url");
         if (url == null || url.isEmpty()) {
@@ -195,9 +230,11 @@ public class Proxy extends Spider {
 
         log("📡 TS 代理 → " + url);
         try {
-            String body = OkHttp.string(url);
-            out.write("HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\n\r\n".getBytes());
-            out.write(body.getBytes("UTF-8"));
+            // 用 bytes() 读取二进制，避免字符串转换损坏数据
+            byte[] bytes = OkHttp.bytes(url);
+            String header = "HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nContent-Length: " + bytes.length + "\r\n\r\n";
+            out.write(header.getBytes());
+            out.write(bytes);
         } catch (Exception e) {
             log("❌ TS 代理失败: " + e.getMessage());
             out.write("HTTP/1.1 502 Bad Gateway\r\n\r\nStream error".getBytes());
