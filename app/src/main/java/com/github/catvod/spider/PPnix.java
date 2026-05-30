@@ -29,10 +29,8 @@ public class PPnix extends Spider {
 
     @Override
     public void init(Context context, String extend) {
-        // 直接在初始化时记录日志，不再弹出密码框
-        try {
-            Proxy.log("✅ PPnix 引擎启动成功 (已对接 10086 代理)");
-        } catch (Exception ignored) {}
+        // 直接记录日志，不再进行弹窗验证
+        try { Proxy.log("PPnix 插件加载成功"); } catch (Exception ignored) {}
     }
 
     @Override
@@ -86,17 +84,13 @@ public class PPnix extends Spider {
             for (Element script : doc.select("script")) {
                 String data = script.data();
                 if (data.contains("infoid") && data.contains("m3u8")) {
-                    // 提取 infoid
                     Matcher m = Pattern.compile("infoid\\s*=\\s*(\\d+)").matcher(data);
                     String infoid = m.find() ? m.group(1) : "";
                     
-                    // 提取集数
                     Matcher ep = Pattern.compile("(\\d+)").matcher(data);
                     while (ep.find()) {
                         String e = ep.group(1);
-                        // 过滤掉 infoid 自身和过长的干扰数字
                         if (!e.equals(infoid) && e.length() < 4) {
-                            // 拼接相对路径
                             playUrls.add("第" + e + "集$/info/m3u8/" + infoid + "/" + e + ".m3u8");
                         }
                     }
@@ -107,7 +101,7 @@ public class PPnix extends Spider {
             vod.setVodId(ids.get(0));
             vod.setVodName(doc.title());
             if (!playUrls.isEmpty()) {
-                vod.setVodPlayFrom("PPnix-Proxy");
+                vod.setVodPlayFrom("PPnix");
                 vod.setVodPlayUrl(TextUtils.join("#", playUrls));
             }
             return Result.string(vod);
@@ -119,22 +113,20 @@ public class PPnix extends Spider {
     @Override
     public String playerContent(String flag, String id, List<String> vipFlags) {
         try {
-            // 补全原始播放地址
+            // 拼接完整原始链接
             String originalUrl = id.startsWith("http") ? id : HOST + id;
 
-            // 构造传给 Proxy.java 的 URL
-            // 对应 Proxy.java 中的 params.get("do").equals("m3u8") 逻辑
+            // 对接 Proxy.java 的 rewrite 逻辑
+            // 构造参数 do=m3u8 配合 Proxy 进行域名替换
             String proxyUrl = Proxy.getUrl() + "?do=m3u8&url=" + URLEncoder.encode(originalUrl, "UTF-8");
 
             Map<String, String> headers = new HashMap<>();
             headers.put("User-Agent", UA);
-            headers.put("Referer", HOST + "/");
+            headers.put("Origin", HOST + "/");
 
-            Proxy.log("📡 代理播放: " + originalUrl);
             return Result.get().url(proxyUrl).header(headers).string();
 
         } catch (Exception e) {
-            // 出错则尝试直连
             return Result.get().url(id).string();
         }
     }
