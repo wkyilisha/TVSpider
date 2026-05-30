@@ -41,7 +41,7 @@ public class Proxy extends Spider {
                 }
             } catch (Exception ignored) {}
         }
-        port = 9978; // 默认端口
+        port = 9978;
         SpiderDebug.log("⚠️ 使用默认 Proxy 端口: 9978");
     }
 
@@ -102,19 +102,15 @@ public class Proxy extends Spider {
             } else if ("log".equals(doParam) || doParam == null) {
                 return new Object[]{200, "text/html; charset=utf-8", new ByteArrayInputStream(buildLogPage().getBytes("UTF-8"))};
 
-            // 完整直播源
             } else if ("livesource".equals(doParam) || "live".equals(doParam) || "iptv".equals(doParam)) {
                 return handleLiveSource();
 
-            // m3u8 TS 重写
             } else if ("m3u8".equals(doParam) || "rewrite".equals(doParam)) {
                 return handleM3U8Proxy(params);
 
-            // 单 TS 流代理
             } else if ("stream".equals(doParam)) {
                 return handleSingleStream(params);
 
-            // 弹幕
             } else if ("danmu".equals(doParam) || "pushdanmu".equals(doParam)) {
                 return handleDanmu(params);
             }
@@ -165,7 +161,7 @@ public class Proxy extends Spider {
         return sb.toString();
     }
 
-    // ====================== m3u8 TS 重写 ======================
+    // ====================== m3u8 TS 重写（重点） ======================
     private Object[] handleM3U8Proxy(Map<String, String> params) {
         String m3u8Url = params.get("url");
         if (m3u8Url == null || m3u8Url.isEmpty()) {
@@ -193,12 +189,24 @@ public class Proxy extends Spider {
         StringBuilder sb = new StringBuilder();
         for (String line : content.split("\n")) {
             line = line.trim();
-            if (line.isEmpty()) { sb.append("\n"); continue; }
-            if (line.startsWith("#")) { sb.append(line).append("\n"); continue; }
+            if (line.isEmpty()) { 
+                sb.append("\n"); 
+                continue; 
+            }
+            if (line.startsWith("#")) { 
+                sb.append(line).append("\n"); 
+                continue; 
+            }
 
             if (line.contains(".ts") || line.matches(".*\\.ts\\?.*")) {
                 String fullTs = makeAbsoluteUrl(line, baseUrl);
-                String proxyTs = getUrl() + "?do=stream&url=" + URLEncoder.encode(fullTs, "UTF-8");
+                String encodedUrl;
+                try {
+                    encodedUrl = URLEncoder.encode(fullTs, "UTF-8");
+                } catch (Exception e) {
+                    encodedUrl = fullTs; // 降级处理
+                }
+                String proxyTs = getUrl() + "?do=stream&url=" + encodedUrl;
                 sb.append(proxyTs).append("\n");
             } else {
                 sb.append(line).append("\n");
