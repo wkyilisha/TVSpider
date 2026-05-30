@@ -230,8 +230,7 @@ public class Proxy extends Spider {
 
         log("📡 TS 代理 → " + url);
         try {
-            // 用 bytes() 读取二进制，避免字符串转换损坏数据
-            byte[] bytes = OkHttp.bytes(url);
+            byte[] bytes = OkHttp.string(url).getBytes("ISO-8859-1");
             String header = "HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nContent-Length: " + bytes.length + "\r\n\r\n";
             out.write(header.getBytes());
             out.write(bytes);
