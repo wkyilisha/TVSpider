@@ -18,7 +18,7 @@ import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
- * 凱哥工具鏈引擎 1.0
+ * 凱哥工具鏈引擎1.0
  *
  * 調用入口：KaiGeTool.process(input, toolChain, host, varCache, lastHtml)
  * toolChain 格式：步骤1#步骤2#步骤3
