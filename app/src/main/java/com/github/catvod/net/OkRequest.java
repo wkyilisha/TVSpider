@@ -64,7 +64,22 @@ class OkRequest {
     public OkResult execute(OkHttpClient client) {
         try {
             Response response = client.newCall(request).execute();
-            return new OkResult(response.code(), response.body().string(), response.headers().toMultimap());
+            
+            String contentType = response.header("Content-Type");
+            boolean isBinary = contentType != null && (
+                contentType.contains("image/") ||
+                contentType.contains("video/") ||
+                contentType.contains("audio/") ||
+                contentType.contains("application/octet-stream")
+            );
+            
+            if (isBinary) {
+                byte[] bodyBytes = response.body().bytes();
+                return new OkResult(response.code(), bodyBytes, response.headers().toMultimap());
+            } else {
+                String body = response.body().string();
+                return new OkResult(response.code(), body, response.headers().toMultimap());
+            }
         } catch (IOException e) {
             return new OkResult();
         }
