@@ -11,58 +11,54 @@ import java.util.*;
 
 public class KaiGeSmart {
 
-public static String buildResult(String data, String key) {
+    public static String buildResult(String data, String key) {
         try {
             if (TextUtils.isEmpty(data)) return "{\"list\":[]}";
             String trimData = data.trim();
 
-            // 🚀 智慧識別 JSON 格式 (如蘋果 CMS 接口)
+            // 智慧識別 JSON 格式
             if (trimData.startsWith("{") || trimData.startsWith("[")) {
-                JSONObject json = new JSONObject(trimData);
-                // 優先取蘋果 CMS 規範的 list 數組，其次取 data 數組
-                JSONArray items = json.optJSONArray("list");
-                if (items == null) items = json.optJSONArray("data");
+                JSONArray items = null;
 
-                // 如果找不到數組，說明不是標準列表，回退原樣
-                if (items == null) return trimData;
+                if (trimData.startsWith("{")) {
+                    JSONObject json = new JSONObject(trimData);
+                    items = json.optJSONArray("list");
+                    if (items == null) items = json.optJSONArray("data");
+                    // 找不到數組，回退原樣
+                    if (items == null) return trimData;
+                } else {
+                    // 直接是 JSON 數組
+                    items = new JSONArray(trimData);
+                }
 
                 JSONArray list = new JSONArray();
                 for (int i = 0; i < items.length(); i++) {
                     JSONObject item = items.getJSONObject(i);
                     JSONObject vod = new JSONObject();
 
-                    // 映射字段：id -> vod_id, name -> vod_name, pic -> vod_pic
-                    // 同時兼容蘋果 CMS 的標準字段名和簡寫名
-                    String vodId = item.optString("vod_id", item.optString("id"));
-                    String vodName = item.optString("vod_name", item.optString("name"));
-                    String vodPic = item.optString("vod_pic", item.optString("pic"));
+                    String vodId      = item.optString("vod_id",      item.optString("id",      ""));
+                    String vodName    = item.optString("vod_name",    item.optString("name",    ""));
+                    String vodPic     = item.optString("vod_pic",     item.optString("pic",     ""));
                     String vodRemarks = item.optString("vod_remarks", item.optString("remarks", ""));
 
                     if (TextUtils.isEmpty(vodId) || TextUtils.isEmpty(vodName)) continue;
-
-                    // 💡 凱哥注意：關鍵字過濾邏輯
                     if (!TextUtils.isEmpty(key) && !vodName.contains(key)) continue;
 
-                    vod.put("vod_id", vodId);
-                    vod.put("vod_name", vodName);
-                    vod.put("vod_pic", fixUrl(vodPic));
+                    vod.put("vod_id",      vodId);
+                    vod.put("vod_name",    vodName);
+                    vod.put("vod_pic",     fixUrl(vodPic));
                     vod.put("vod_remarks", vodRemarks);
                     list.put(vod);
                 }
                 return new JSONObject().put("list", list).toString();
             }
 
-            // ---------------------------------------------------------
-            // 💡 以下為 HTML 原有邏輯，保持不變
-            // ---------------------------------------------------------
+            // HTML 解析
             JSONObject result = new JSONObject();
             JSONArray list = new JSONArray();
             Document doc = Jsoup.parse(trimData);
 
-            // 💡 JSON 規則優先：如果傳入的是片段，直接解析其子節點
             Elements items = doc.body().children();
-
-            // 💡 保底邏輯：如果傳入整頁，自動識別容器
             if (items.size() < 3) {
                 items = doc.select(".myui-vodlist__item, .vodlist_item, .fed-list-item, .pack-ykpack, .list-item, .v-item, .module-item, .stui-vodlist__item, li:has(img), a:has(img)");
             }
@@ -70,10 +66,7 @@ public static String buildResult(String data, String key) {
             for (Element el : items) {
                 JSONObject vod = parseList(el);
                 if (vod.has("vod_id") && !TextUtils.isEmpty(vod.optString("vod_name"))) {
-
-                    // 💡 凱哥注意：這裡直接從 vod 裡取名字來比對
                     if (!TextUtils.isEmpty(key) && !vod.optString("vod_name").contains(key)) continue;
-
                     list.put(vod);
                 }
             }
@@ -102,25 +95,25 @@ public static String buildResult(String data, String key) {
         try {
             String id = findUrl(el);
             if (TextUtils.isEmpty(id) || id.contains("javascript")) return vod;
-            
-            String name = findTitle(el);
-            String pic = findPic(el);
 
-            // 智慧回溯父節點（適配 a:has(img) 結構）
+            String name = findTitle(el);
+            String pic  = findPic(el);
+
+            // 智慧回溯父節點
             if (TextUtils.isEmpty(pic) || TextUtils.isEmpty(name)) {
                 Element p = el.parent();
                 if (p != null) {
                     if (TextUtils.isEmpty(name)) name = findTitle(p);
-                    if (TextUtils.isEmpty(pic)) pic = findPic(p);
+                    if (TextUtils.isEmpty(pic))  pic  = findPic(p);
                 }
             }
 
             if (TextUtils.isEmpty(name)) return vod;
-            
+
             vod.put("vod_name", name);
-            vod.put("vod_id", id);
-            vod.put("vod_pic", pic);
-            
+            vod.put("vod_id",   id);
+            vod.put("vod_pic",  pic);
+
             // 狀態備註抓取
             String remarks = "";
             Element remarkNode = el.selectFirst(".pic-text, .remarks, .state, .pic-tag-bottom, .tag, .label, .badge, .pic-tag, .status");
@@ -131,7 +124,7 @@ public static String buildResult(String data, String key) {
                     String text = tag.text().trim();
                     if (text.matches(".*(更新|至|[0-9]集|期|完|版|HD|BD|TS|蓝|藍).*")) {
                         remarks = text;
-                        break; 
+                        break;
                     }
                 }
             }
@@ -146,7 +139,7 @@ public static String buildResult(String data, String key) {
         try {
             Element titleNode = doc.selectFirst("h1, .title, .myui-content__detail h1, .module-info-heading h1, .detail-title");
             vod.put("vod_name", titleNode != null ? titleNode.text().trim() : "未知標題");
-            vod.put("vod_pic", findPic(doc));
+            vod.put("vod_pic",  findPic(doc));
 
             Elements contents = doc.select(".content, .sketch, .data, #desc, .vod_content, .module-info-introduction-content, .detail-content");
             String bestContent = "";
@@ -158,10 +151,10 @@ public static String buildResult(String data, String key) {
             Elements dataNodes = doc.select(".data, p, li, .myui-content__detail p, .module-info-item, .detail-info-item");
             for (Element node : dataNodes) {
                 String text = node.text();
-                if (text.contains("主演")) vod.put("vod_actor", getTagsOrText(node, "主演"));
+                if (text.contains("主演"))                              vod.put("vod_actor",    getTagsOrText(node, "主演"));
                 else if (text.contains("导演") || text.contains("導演")) vod.put("vod_director", getTagsOrText(node, "导演"));
-                else if (text.contains("地区") || text.contains("地區")) vod.put("vod_area", getTagsOrText(node, "地区"));
-                else if (text.contains("年份") || text.contains("年代")) vod.put("vod_year", getTagsOrText(node, "年份"));
+                else if (text.contains("地区") || text.contains("地區")) vod.put("vod_area",     getTagsOrText(node, "地区"));
+                else if (text.contains("年份") || text.contains("年代")) vod.put("vod_year",     getTagsOrText(node, "年份"));
                 else if (text.matches(".*(更新|狀態|状态).*")) {
                     vod.put("vod_remarks", text.replaceAll(".*[:：]", "").trim());
                 }
@@ -174,8 +167,8 @@ public static String buildResult(String data, String key) {
     private static void processPlaylist(Document doc, JSONObject vod) {
         try {
             List<String> fromList = new ArrayList<>();
-            List<String> urlList = new ArrayList<>();
-            Elements tabs = doc.select(".tabs li, .line-title, .from-list li, .playlist-tab li, .myui-panel__head li, .module-tab-item, .anthology-tab a");
+            List<String> urlList  = new ArrayList<>();
+            Elements tabs   = doc.select(".tabs li, .line-title, .from-list li, .playlist-tab li, .myui-panel__head li, .module-tab-item, .anthology-tab a");
             Elements blocks = doc.select(".playlist, .content_playlist, .play-list-box, #playlist, .myui-content__list, .myui-panel_bd .tab-content, .module-play-list, .anthology-list-box");
 
             if (blocks.isEmpty()) {
@@ -186,7 +179,7 @@ public static String buildResult(String data, String key) {
                 }
             } else {
                 for (int i = 0; i < blocks.size(); i++) {
-                    String name = (i < tabs.size()) ? tabs.get(i).text().trim() : "線路 " + (i + 1);
+                    String name  = (i < tabs.size()) ? tabs.get(i).text().trim() : "線路 " + (i + 1);
                     String links = findAllLinks(blocks.get(i));
                     if (!links.isEmpty()) {
                         fromList.add(name);
@@ -213,33 +206,30 @@ public static String buildResult(String data, String key) {
     }
 
     /**
-     * 🚀 凱哥特調：精準圖片抓取邏輯 (相容舊版 Jsoup)
-     * 優先級：<a>標籤下的 lazyload -> <img>標籤屬性 -> 背景圖
+     * 精準圖片抓取：lazyload -> img 屬性 -> 背景圖
      */
     public static String findPic(Element el) {
         if (el == null) return "";
 
-        // 1. 優先找帶有 lazyload 類名的標籤（尤其是 a, div, span）
         Elements lazies = el.select(".lazyload, .lazy, .videopic, .img-responsive");
         for (Element lazy : lazies) {
             String val = getImgFromAttributes(lazy);
             if (!val.isEmpty()) return fixUrl(val);
         }
 
-        // 2. 其次找 img 標籤（哪怕它沒有 lazyload 類名）
         Elements imgs = el.select("img");
         for (Element img : imgs) {
             String val = getImgFromAttributes(img);
             if (!val.isEmpty()) return fixUrl(val);
         }
 
-        // 3. 背景圖兜底 (將 allElements() 替換為 select("*") 以兼容舊版本)
-        Elements all = el.select("*"); 
+        Elements all = el.select("*");
         for (Element item : all) {
             String style = item.attr("style");
             if (style.contains("url(")) {
                 try {
-                    String val = style.substring(style.indexOf("url(") + 4, style.lastIndexOf(")")).replace("'", "").replace("\"", "").trim();
+                    String val = style.substring(style.indexOf("url(") + 4, style.lastIndexOf(")"))
+                        .replace("'", "").replace("\"", "").trim();
                     if (isValidPic(val)) return fixUrl(val);
                 } catch (Exception ignored) {}
             }
@@ -247,11 +237,7 @@ public static String buildResult(String data, String key) {
         return "";
     }
 
-    /**
-     * 💡 私有工具：從屬性中提取圖片地址
-     */
     private static String getImgFromAttributes(Element item) {
-        // 凱哥，這裡的屬性順序就是抓取的優先級順序
         String[] attrs = {"data-original", "data-src", "src", "data-main", "data-lazy-src", "data-srcset", "_src"};
         for (String a : attrs) {
             String val = item.attr(a).trim();
@@ -260,15 +246,10 @@ public static String buildResult(String data, String key) {
         return "";
     }
 
-    /**
-     * 💡 私有工具：驗證地址是否為真實圖片
-     */
     private static boolean isValidPic(String url) {
         if (TextUtils.isEmpty(url)) return false;
         String u = url.toLowerCase();
-        // 排除掉 loading 動圖和 base64
         if (u.contains(".gif") || u.contains("base64,")) return false;
-        // 只要是 http 開頭或是相對路徑地址就認為是潛在圖片
         return u.startsWith("http") || u.startsWith("/") || u.startsWith("//");
     }
 
@@ -314,7 +295,8 @@ public static String buildResult(String data, String key) {
         }
         return node.text().replaceAll(key + "[:：]", "").trim();
     }
-public static JSONObject parseListItem(JSONObject item) {
+
+    public static JSONObject parseListItem(JSONObject item) {
         JSONObject vod = new JSONObject();
         try {
             String vodId      = item.optString("vod_id",      item.optString("id",      ""));
