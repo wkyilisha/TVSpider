@@ -5,6 +5,7 @@ import android.util.Base64;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.Map;
+import java.security.MessageDigest;
 import java.util.HashMap;
 
 /**
