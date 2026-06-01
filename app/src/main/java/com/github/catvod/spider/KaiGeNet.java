@@ -11,26 +11,25 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class KaiGeNet {
 
-    // 🚀 Cookie 緩存：解決「二次請求」和「登錄狀態」核心
     private static final Map<String, String> cookieJar = new ConcurrentHashMap<>();
     private static final String MOBILE_UA = "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.178 Mobile Safari/537.36";
 
     /**
      * 凱哥智慧請求核心
      * @param siteUrl 來源站點（用於注入 Referer）
-     * @param method 請求方式 get/post
-     * @param url 目標網址
-     * @param body 請求參數
+     * @param method  請求方式 get/post
+     * @param url     目標網址
+     * @param body    請求參數
      * @param headers 自定義頭
      */
-public static OkResult smartRequest(String siteUrl, String method, String url, String body, Map<String, String> headers) {
+    public static OkResult smartRequest(String siteUrl, String method, String url, String body, Map<String, String> headers) {
         String host = getHost(url);
         if (headers == null) headers = new HashMap<>();
 
         // 1. 注入萬用 UA
         if (!headers.containsKey("User-Agent")) headers.put("User-Agent", MOBILE_UA);
 
-        // 2. 🚀 凱哥防護：注入安全 Referer
+        // 2. 注入安全 Referer
         if (!headers.containsKey("Referer")) {
             if (!TextUtils.isEmpty(siteUrl) && siteUrl.matches("^[\\x00-\\x7F]*$")) {
                 headers.put("Referer", siteUrl);
@@ -47,14 +46,14 @@ public static OkResult smartRequest(String siteUrl, String method, String url, S
         // 4. 執行正式請求
         OkResult res = execute(method, url, body, headers);
 
-        // 5. 提取Set-Cookie更新cookieJar
+        // 5. 提取 Set-Cookie 更新 cookieJar
         String setCookie = getSetCookie(res.getResp());
         if (!TextUtils.isEmpty(setCookie)) {
-            String existCookie = cookieJar.getOrDefault(host, "");
+            String existCookie = cookieJar.containsKey(host) ? cookieJar.get(host) : "";
             String mergedCookie = mergeCookies(existCookie, setCookie);
             cookieJar.put(host, mergedCookie);
 
-            // CDN盾JS计算
+            // CDN 盾 JS 计算
             String bodyStr = res.getBody() == null ? "" : res.getBody().trim();
             if (bodyStr.contains("cdndefend_js_cookie")) {
                 String jsCookie = cdnDefendCookie(bodyStr);
@@ -73,24 +72,23 @@ public static OkResult smartRequest(String siteUrl, String method, String url, S
 
         return res;
     }
-    // 🚀 內部執行器：支持 POST(JSON/表單) 和 GET 參數自動轉換
+
+    // 內部執行器：支持 POST(JSON/表單) 和 GET 參數自動轉換
     private static OkResult execute(String method, String url, String body, Map<String, String> headers) {
         method = (method == null) ? "get" : method.toLowerCase();
-        
+
         if ("post".equals(method)) {
-            // 如果 body 是 JSON 字符串則直接 POST 字符串，否則轉 Map 發送表單
             if (!TextUtils.isEmpty(body) && body.trim().startsWith("{")) {
                 return OkHttp.post(url, body, headers);
             } else {
                 return OkHttp.post(url, parseToMap(body), headers);
             }
         }
-        
-        // 默認使用 GET
+
         return OkHttp.get(url, parseToMap(body), headers);
     }
 
-    // 輔助：從 OkResult 的響應頭中安全提取 Cookie 字符串
+    // 從 OkResult 的響應頭中安全提取 Cookie 字符串
     private static String getSetCookie(Map<String, List<String>> respHeaders) {
         if (respHeaders == null) return "";
         List<String> cookies = respHeaders.get("Set-Cookie");
@@ -101,7 +99,7 @@ public static OkResult smartRequest(String siteUrl, String method, String url, S
         return "";
     }
 
-    // 輔助：提取網址 Host 域名（帶層級兼容）
+    // 提取網址 Host 域名
     private static String getHost(String urlStr) {
         if (TextUtils.isEmpty(urlStr)) return "";
         try {
@@ -115,7 +113,7 @@ public static OkResult smartRequest(String siteUrl, String method, String url, S
         }
     }
 
-    // 輔助：將 URL 參數字符串轉為 Map
+    // 將 URL 參數字符串轉為 Map
     private static Map<String, String> parseToMap(String body) {
         Map<String, String> map = new HashMap<>();
         if (TextUtils.isEmpty(body)) return map;
@@ -128,17 +126,16 @@ public static OkResult smartRequest(String siteUrl, String method, String url, S
         } catch (Exception ignored) {}
         return map;
     }
-    // ✅ 合并Cookie：避免新cookie覆盖旧cookie，相同key取新值
+
+    // 合并 Cookie：相同 key 取新值
     private static String mergeCookies(String oldCookie, String newCookie) {
         if (TextUtils.isEmpty(oldCookie)) return newCookie;
         if (TextUtils.isEmpty(newCookie)) return oldCookie;
         Map<String, String> cookieMap = new java.util.LinkedHashMap<>();
-        // 先放旧的
         for (String part : oldCookie.split(";")) {
             String[] kv = part.trim().split("=", 2);
             if (kv.length == 2) cookieMap.put(kv[0].trim(), kv[1].trim());
         }
-        // 新的覆盖旧的（相同key取新值）
         for (String part : newCookie.split(";")) {
             String[] kv = part.trim().split("=", 2);
             if (kv.length == 2) cookieMap.put(kv[0].trim(), kv[1].trim());
@@ -150,15 +147,17 @@ public static OkResult smartRequest(String siteUrl, String method, String url, S
         }
         return sb.toString();
     }
-    // ✅ 外部写入cookie到cookieJar
+
+    // 外部写入 cookie 到 cookieJar
     public static void putCookie(String url, String cookie) {
         String host = getHost(url);
         if (!TextUtils.isEmpty(host) && !TextUtils.isEmpty(cookie)) {
-            String existing = cookieJar.getOrDefault(host, "");
+            String existing = cookieJar.containsKey(host) ? cookieJar.get(host) : "";
             cookieJar.put(host, mergeCookies(existing, cookie));
         }
     }
-    // ✅ CDN盾验证：自动计算 cdndefend_js_cookie
+
+    // CDN 盾验证：自动计算 cdndefend_js_cookie
     public static String cdnDefendCookie(String html) {
         try {
             java.util.regex.Matcher m = java.util.regex.Pattern
