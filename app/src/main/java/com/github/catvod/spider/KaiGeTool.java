@@ -2,6 +2,8 @@ package com.github.catvod.spider;
 
 import android.text.TextUtils;
 import android.util.Base64;
+import com.github.catvod.net.OkHttp;
+import com.github.catvod.net.OkResult;
 import org.json.JSONObject;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
