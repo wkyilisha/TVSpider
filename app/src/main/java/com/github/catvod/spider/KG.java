@@ -508,9 +508,27 @@ public class KG extends Spider {
 
             Element nextList = (idx < allLists.size()) ? allLists.get(idx) : null;
             if (nextList != null) {
-                logDebug("🔍 [pLists存入] 第" + fList.size() + "条线路 HTML前50: " + nextList.outerHtml().substring(0, Math.min(50, nextList.outerHtml().length())));
+                String listHtml    = nextList.outerHtml();
+                String fromUrlRule = rule.optString("dt_from_url", "");
+
+                if (!TextUtils.isEmpty(fromUrlRule)) {
+                    String secondaryUrl = KaiGeEngine.doExtract(listHtml, fromUrlRule, this.siteUrl).value;
+                    if (!TextUtils.isEmpty(secondaryUrl)) {
+                        if (!secondaryUrl.startsWith("http")) {
+                            secondaryUrl = this.siteUrl + (secondaryUrl.startsWith("/") ? "" : "/") + secondaryUrl;
+                        }
+                        try {
+                            OkResult secondaryRes = KaiGeNet.smartRequest(this.siteUrl, "get", secondaryUrl, null, getHeaders(null));
+                            String secondaryHtml  = secondaryRes.getBody();
+                            if (!TextUtils.isEmpty(secondaryHtml)) listHtml = secondaryHtml;
+                        } catch (Exception ex) {
+                            logError("⚠️ [dt_from_url] 二級請求異常: " + ex.getMessage());
+                        }
+                    }
+                }
+
                 fList.add(sourceName);
-                pLists.add(nextList.outerHtml());
+                pLists.add(listHtml);
             }
             idx++;
         }
@@ -1182,7 +1200,7 @@ public class KG extends Spider {
         "cate_item", "cate_id", "cate_name", "cate_pic", "cate_remarks", "cate_list_path",
         "search_url", "search_method", "search_body", "sc_item", "sc_id", "sc_name",
         "sc_pic", "sc_remarks", "detail_url", "detail_method", "detail_body",
-        "dt_name", "dt_pic", "dt_remarks", "dt_actor", "dt_director", "dt_content", "dt_list", "dt_from",
+        "dt_name", "dt_pic", "dt_remarks", "dt_actor", "dt_director", "dt_content", "dt_list", "dt_from","dt_from_url",
         "classes", "filters", "play"
     ));
 
