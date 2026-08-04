@@ -75,8 +75,9 @@ dependencies {
     testImplementation "io.github.dokar3:quickjs-kt-jvm:1.0.0-alpha13"
     testImplementation 'org.nanohttpd:nanohttpd:2.3.1'
     implementation 'commons-codec:commons-codec:1.17.1'
-    implementation 'io.github.albfernandez:quickjs-android:0.9.0'
-    // [新增] 用于 TLS 指纹伪造
+    implementation 'org.mozilla:rhino:1.7.15'
+    
+    // TLS 指纹伪造依赖
     implementation 'com.squareup.okhttp3:okhttp-tls:4.10.0'
 
     // Required -- JUnit 4 framework
