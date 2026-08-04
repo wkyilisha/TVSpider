@@ -77,7 +77,7 @@ dependencies {
     implementation 'commons-codec:commons-codec:1.17.1'
     implementation 'org.mozilla:rhino:1.7.15'
     
-    // TLS 指纹伪造依赖
+    // TLS指纹伪造依赖
     implementation 'com.squareup.okhttp3:okhttp-tls:4.10.0'
 
     // Required -- JUnit 4 framework
