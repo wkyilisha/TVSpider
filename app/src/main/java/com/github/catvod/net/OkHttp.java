@@ -8,6 +8,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
+import okhttp3.ConnectionPool;
+import okhttp3.Dispatcher;
 import okhttp3.Dns;
 import okhttp3.Headers;
 import okhttp3.OkHttpClient;
@@ -77,7 +79,8 @@ public class OkHttp {
     public static String getLocation(String url, Map<String, String> header) throws IOException {
         return getLocation(client().newBuilder().followRedirects(false).followSslRedirects(false).build().newCall(new Request.Builder().url(url).headers(Headers.of(header)).build()).execute().headers().toMultimap());
     }
-    public static Map<String, List<String>>  getLocationHeader(String url, Map<String, String> header) throws IOException {
+
+    public static Map<String, List<String>> getLocationHeader(String url, Map<String, String> header) throws IOException {
         return client().newBuilder().followRedirects(false).followSslRedirects(false).build().newCall(new Request.Builder().url(url).headers(Headers.of(header)).build()).execute().headers().toMultimap();
     }
 
@@ -93,8 +96,32 @@ public class OkHttp {
         return get().client = getBuilder().build();
     }
 
+    /**
+     * 构建集成了 TLS 伪造与高并发支持的 OkHttpClient
+     */
     private static OkHttpClient.Builder getBuilder() {
-        return new OkHttpClient.Builder().dns(safeDns()).connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).writeTimeout(30, TimeUnit.SECONDS).hostnameVerifier((hostname, session) -> true).sslSocketFactory(new SSLCompat(), SSLCompat.TM);
+        // 1. 设置高并发请求调度器与连接池
+        Dispatcher dispatcher = new Dispatcher();
+        dispatcher.setMaxRequests(64);
+        dispatcher.setMaxRequestsPerHost(16);
+
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+                .dispatcher(dispatcher)
+                .connectionPool(new ConnectionPool(32, 5, TimeUnit.MINUTES))
+                .dns(safeDns())
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .hostnameVerifier((hostname, session) -> true);
+
+        // 2. 注入伪造的 Chrome TLS 指纹 Socket 工厂，若异常则降级为默认 SSLCompat
+        try {
+            builder.sslSocketFactory(new CustomTLSSocketFactory(), SSLCompat.TM);
+        } catch (Throwable e) {
+            builder.sslSocketFactory(new SSLCompat(), SSLCompat.TM);
+        }
+
+        return builder;
     }
 
     private static OkHttpClient client() {
