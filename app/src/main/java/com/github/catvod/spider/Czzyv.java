@@ -370,7 +370,6 @@ public class Czzyv extends Spider {
             // 设置视频播放器拉取 m3u8 切片时必须带上的防盗链请求头
             Map<String, String> headers = new HashMap<>();
             headers.put("User-Agent", UA);
-            headers.put("Referer", HOST + "/");
             headers.put("Origin", HOST);
 
             return Result.get().url(videoUrl).header(headers).string();
