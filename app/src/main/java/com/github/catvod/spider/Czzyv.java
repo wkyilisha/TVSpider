@@ -25,9 +25,9 @@ import java.util.regex.Pattern;
 
 public class Czzyv extends Spider {
 
-    // 直接使用指定域名作为默认主站，不再强依赖发布页解析
-    private static String HOST = "https://czzy.top";
-    private static final String NAV_URL = "https://czzy.top/";
+    // 默认备用域名
+    private static String HOST = "https://www.4kcz.com";
+    private static final String NAV_URL = "https://www.czzy.site/";
     private static final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
     private static final LinkedHashMap<String, String> CATEGORY_MAP = new LinkedHashMap<>();
@@ -50,7 +50,7 @@ public class Czzyv extends Spider {
     }
 
     /**
-     * 根据抓包特征，动态基于当前 HOST 构造 Header，防止 Origin / Referer 域名不匹配
+     * 根据抓包特征，补全防盗链与第三方解析接口所需的所有 Request Header
      */
     private Map<String, String> getHeaders(String referer) {
         Map<String, String> headers = new HashMap<>();
@@ -62,7 +62,7 @@ public class Czzyv extends Spider {
         headers.put("Cache-Control", "no-cache");
         headers.put("Pragma", "no-cache");
         
-        // 模拟全套标准 Chrome 安全请求头
+        // 关键：模拟标准 Chrome 浏览器的安全校验请求头，防止解析接口（如 py.php）直接拦截
         headers.put("sec-ch-ua", "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"");
         headers.put("sec-ch-ua-mobile", "?0");
         headers.put("sec-ch-ua-platform", "\"Windows\"");
@@ -88,41 +88,58 @@ public class Czzyv extends Spider {
     }
 
     /**
-     * 尝试直连 https://czzy.top，若不通再进行自动备用解析
+     * 从导航页动态获取最新可用的主站域名
      */
     private void resolveHost() {
         try {
-            logger("检查主站域名连通性: " + HOST);
-            String testHtml = get(HOST + "/");
-            if (!TextUtils.isEmpty(testHtml)) {
-                logger("✅ 直连 " + HOST + " 成功！");
-                return;
-            }
+            logger("正在访问导航页获取最新域名: " + NAV_URL);
 
-            logger("⚠️ 直连 " + HOST + " 失败或被拦截，尝试从导航页提取最新域名...");
             Map<String, String> navHeaders = new HashMap<>();
             navHeaders.put("User-Agent", UA);
             navHeaders.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            navHeaders.put("Accept-Language", "zh-CN,zh;q=0.9");
 
             String html = OkHttp.string(NAV_URL, navHeaders);
-            if (TextUtils.isEmpty(html)) return;
+            if (TextUtils.isEmpty(html)) {
+                logger("导航页获取失败，使用默认域名: " + HOST);
+                return;
+            }
 
             Document doc = Jsoup.parse(html);
             Elements links = doc.select("a");
 
+            // 1. 优先提取「点击这里手动跳转」所指向的域名
+            for (Element a : links) {
+                String text = a.text().trim();
+                if (text.contains("点击这里手动跳转") || text.contains("手动跳转")) {
+                    String href = a.attr("href").trim();
+                    if (!TextUtils.isEmpty(href)) {
+                        if (href.startsWith("//")) href = "https:" + href;
+                        if (!href.startsWith("http")) href = "https://" + href;
+                        if (href.endsWith("/")) href = href.substring(0, href.length() - 1);
+                        HOST = href;
+                        logger("✅ 从导航页获取到最新主站域名: " + HOST);
+                        return;
+                    }
+                }
+            }
+
+            // 2. 备用关键字逻辑匹配
             for (Element a : links) {
                 String href = a.attr("href").trim();
-                if (href.contains("czzy.top") || href.contains("4kcz.com") || href.contains("cz4k.com")) {
+                if (href.contains("4kcz.com") || href.contains("czzy.top") || href.contains("cz4k.com")) {
                     if (href.startsWith("//")) href = "https:" + href;
                     if (!href.startsWith("http")) href = "https://" + href;
                     if (href.endsWith("/")) href = href.substring(0, href.length() - 1);
                     HOST = href;
-                    logger("✅ 备用解析到可用域名: " + HOST);
+                    logger("✅ 备用正则匹配到主站域名: " + HOST);
                     return;
                 }
             }
+
+            logger("未从导航页解析到新域名，继续使用默认域名: " + HOST);
         } catch (Exception e) {
-            logger("解析域名异常: " + e.getMessage() + "，维持使用: " + HOST);
+            logger("解析导航页异常: " + e.getMessage() + "，继续使用默认: " + HOST);
         }
     }
 
@@ -133,11 +150,16 @@ public class Czzyv extends Spider {
         return m.find() ? m.group(1) : null;
     }
 
+    /**
+     * 核心解密：提取播放页中的 iframe 地址，并结合 Header 提取真实的 m3u8 直链
+     */
     private String extractVideoUrlFromPlayPage(String playUrl) {
         try {
+            // 1. 获取播放页 HTML
             String html = get(playUrl, HOST + "/");
             if (TextUtils.isEmpty(html)) return null;
 
+            // 2. 提取 iframe 节点
             Pattern iframePattern = Pattern.compile("<iframe[^>]+src=[\"']([^\"']+)[\"']");
             Matcher iframeMatcher = iframePattern.matcher(html);
 
@@ -151,27 +173,29 @@ public class Czzyv extends Spider {
                     iframeUrl = HOST + iframeUrl;
                 }
 
+                // 优先检查：如果 URL 参数中直接含有 url=https://...，则直接截取，性能最高
                 if (iframeUrl.contains("url=")) {
                     String paramUrl = iframeUrl.substring(iframeUrl.indexOf("url=") + 4);
                     if (paramUrl.contains("&")) {
                         paramUrl = paramUrl.substring(0, paramUrl.indexOf("&"));
                     }
                     if (paramUrl.startsWith("http")) {
-                        logger("🚀 从 iframe URL 参数直取 m3u8 地址: " + paramUrl);
+                        logger("🚀 成功从 iframe 的 URL 参数中提取到 m3u8 地址: " + paramUrl);
                         return paramUrl;
                     }
                 }
 
-                // 带上当前 HOST 的 Referer 去访问第三方解析页 py.php
+                // 兜底方案：携带完整防盗链 Header 访问第三方解析接口（如 py.php）
                 String iframeHtml = get(iframeUrl, HOST + "/");
                 if (TextUtils.isEmpty(iframeHtml)) {
-                    logger("iframe 页面获取失败");
+                    logger("iframe 页面获取失败（被接口阻断或返回空数据）");
                     return null;
                 }
 
+                // 从返回的 HTML 代码中提取 const mysvg 的值
                 String videoUrl = extractMysvgValue(iframeHtml);
                 if (videoUrl != null) {
-                    logger("✅ 成功提取 mysvg 视频地址: " + videoUrl);
+                    logger("✅ 成功从 iframe HTML 中匹配提取到 mysvg 真实视频地址: " + videoUrl);
                     return videoUrl;
                 }
             }
@@ -343,9 +367,10 @@ public class Czzyv extends Spider {
 
             logger("解析成功，返回视频直链: " + videoUrl);
 
-            // 给播放器的请求头不携带 Referer，仅保留 User-Agent
+            // 设置视频播放器拉取 m3u8 切片时必须带上的防盗链请求头
             Map<String, String> headers = new HashMap<>();
             headers.put("User-Agent", UA);
+            headers.put("Origin", HOST);
 
             return Result.get().url(videoUrl).header(headers).string();
         } catch (Exception e) {
@@ -367,10 +392,14 @@ public class Czzyv extends Spider {
                 return Result.string(new ArrayList<>());
             }
 
+            logger("搜索返回页面长度: " + html.length());
+
             Document doc = Jsoup.parse(html);
             Elements items = doc.select(".search_list ul li");
             if (items.isEmpty()) items = doc.select(".bt_img ul li");
             if (items.isEmpty()) items = doc.select("ul li");
+
+            logger("找到候选条目数: " + items.size());
 
             List<Vod> resultList = new ArrayList<>();
             String normalizedKey = key.trim().toLowerCase();
@@ -389,6 +418,8 @@ public class Czzyv extends Spider {
                     continue;
                 }
 
+                logger("匹配到搜素结果: " + title);
+
                 String detailUrl = titleLink.attr("href");
                 if (TextUtils.isEmpty(detailUrl)) continue;
 
@@ -406,6 +437,7 @@ public class Czzyv extends Spider {
                 resultList.add(vod);
             }
 
+            logger("搜索完成，成功匹配条数: " + resultList.size());
             return Result.string(resultList);
         } catch (Exception e) {
             logger("搜索出现异常: " + e.getMessage());
